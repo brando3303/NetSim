@@ -58,3 +58,6 @@ class Network:
   
   def randint(self, a: int, b: int):
     return self.sim.rng.randint(a, b)
+  
+  def gauss(self, mu: float, sigma: float):
+    return self.sim.rng.gauss(mu, sigma)

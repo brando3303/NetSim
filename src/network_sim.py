@@ -74,6 +74,9 @@ class NetworkSim:
   
   def randint(self, a: int, b: int):
     return self.rng.randint(a, b)
+
+  def gauss(self, mu: float, sigma: float):
+    return self.rng.gauss(mu, sigma)
   
 @dataclass(order=True)
 class Event:

@@ -34,6 +34,9 @@ class Node:
   def receive(self, packet: Packet):
     pass
 
+  def validate_packet(self, packet: Packet) -> bool:
+    return packet.validate()
+
   def set_timer(self, delay: int, callback: Callable, *args, **kwargs):
     self.network.schedule_after(delay, callback, *args, **kwargs)
       
