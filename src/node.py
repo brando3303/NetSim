@@ -8,7 +8,7 @@ if TYPE_CHECKING:
   from .packet import Packet
 
 class Node:
-  def __init__(self, name: str):
+  def __init__(self, name: int):
     self.name = name
     self.channels = []
     self._network: Network | None = None

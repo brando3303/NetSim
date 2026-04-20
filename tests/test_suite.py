@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.channel import Channel
+from src.channel import BROADCAST_ID, Channel
 from src.network import Network
 from src.network_sim import NetworkSim
 from src.node import Node
@@ -10,7 +10,7 @@ from src.packet import Packet
 
 
 class RecordingNode(Node):
-    def __init__(self, name: str):
+    def __init__(self, name: int):
         super().__init__(name)
         self.init_called = 0
         self.start_called = 0
@@ -27,7 +27,7 @@ class RecordingNode(Node):
 
 
 class SenderNode(RecordingNode):
-    def __init__(self, name: str, payload: str, dst: str):
+    def __init__(self, name: int, payload: str, dst: int):
         super().__init__(name)
         self.payload = payload
         self.dst = dst
@@ -48,8 +48,8 @@ def build_basic_topology(
     sim = NetworkSim(seed=seed, logging=False)
     network = Network(sim)
 
-    node1 = RecordingNode("Node 1")
-    node2 = RecordingNode("Node 2")
+    node1 = RecordingNode(1)
+    node2 = RecordingNode(2)
     network.add_node(node1)
     network.add_node(node2)
 
@@ -67,20 +67,20 @@ def build_basic_topology(
 
 
 def test_packet_round_trip_string_payload_preserves_fields_and_validates():
-    packet = Packet("hello", "A", "B")
+    packet = Packet("hello", 101, 202)
 
     raw = packet.to_bytes()
     decoded = Packet.from_bytes(raw)
 
-    assert decoded.src == "A"
-    assert decoded.dst == "B"
+    assert decoded.src == 101
+    assert decoded.dst == 202
     assert decoded.data == "hello"
     assert decoded.validate() is True
 
 
 def test_packet_round_trip_binary_payload_preserves_bytes():
     payload = bytes([0, 1, 2, 250, 255])
-    packet = Packet(payload, "A", "B")
+    packet = Packet(payload, 101, 202)
 
     decoded = Packet.from_bytes(packet.to_bytes())
 
@@ -89,7 +89,7 @@ def test_packet_round_trip_binary_payload_preserves_bytes():
 
 
 def test_packet_validate_fails_after_payload_tamper():
-    packet = Packet("hello", "A", "B")
+    packet = Packet("hello", 101, 202)
     raw = bytearray(packet.to_bytes())
 
     # Flip one byte in the packet body, leaving the appended CRC unchanged.
@@ -121,7 +121,7 @@ def test_network_requires_at_least_one_node_for_init():
 def test_network_start_requires_init_first():
     sim = NetworkSim(seed=1)
     network = Network(sim)
-    network.add_node(RecordingNode("only"))
+    network.add_node(RecordingNode(1))
 
     with pytest.raises(Exception, match="initialized before starting"):
         network.start()
@@ -135,8 +135,8 @@ def test_send_respects_channel_queue_limit_and_drops_extra_packets():
     limited_channel.add_node(_n1)
     limited_channel.add_node(_n2)
 
-    limited_channel.send(Packet("first", "Node 1", "Node 2"))
-    limited_channel.send(Packet("second", "Node 1", "Node 2"))
+    limited_channel.send(Packet("first", 1, 2))
+    limited_channel.send(Packet("second", 1, 2))
 
     assert len(limited_channel.packetQueue) == 1
     assert len(sim.eventQueue) == 1
@@ -144,7 +144,7 @@ def test_send_respects_channel_queue_limit_and_drops_extra_packets():
 
 def test_channel_delivers_when_packet_is_valid():
     _sim, _network, channel, n1, n2 = build_basic_topology()
-    packet_bytes = Packet("ok", "Node 1", "Node 2").to_bytes()
+    packet_bytes = Packet("ok", 1, 2).to_bytes()
 
     channel.handle_receive_packet(packet_bytes)
 
@@ -154,7 +154,7 @@ def test_channel_delivers_when_packet_is_valid():
 
 def test_channel_drops_corrupted_packet_when_error_injection_triggers():
     _sim, _network, channel, n1, n2 = build_basic_topology(error_rate=1.0, average_error=2)
-    packet_bytes = Packet("hello", "Node 1", "Node 2").to_bytes()
+    packet_bytes = Packet("hello", 1, 2).to_bytes()
 
     channel.handle_receive_packet(packet_bytes)
 
@@ -175,8 +175,8 @@ def test_full_simulation_start_init_and_delivery_flow():
     sim = NetworkSim(seed=42, logging=False)
     network = Network(sim)
 
-    sender = SenderNode("Node 1", payload="Hello", dst="Node 2")
-    receiver = RecordingNode("Node 2")
+    sender = SenderNode(1, payload="Hello", dst=2)
+    receiver = RecordingNode(2)
     network.add_node(sender)
     network.add_node(receiver)
 
@@ -199,7 +199,57 @@ def test_full_simulation_start_init_and_delivery_flow():
 def test_design_doc_destination_only_delivery_requirement():
     _sim, _network, channel, n1, n2 = build_basic_topology()
 
-    channel.handle_receive_packet(Packet("to node2", "Node 1", "Node 2").to_bytes())
+    channel.handle_receive_packet(Packet("to node2", 1, 2).to_bytes())
 
     assert len(n1.received) == 0
     assert len(n2.received) == 1
+
+
+def test_broadcast_delivers_to_all_nodes_except_source():
+    sim = NetworkSim(seed=42, logging=False)
+    network = Network(sim)
+
+    n1 = RecordingNode(1)
+    n2 = RecordingNode(2)
+    n3 = RecordingNode(3)
+    network.add_node(n1)
+    network.add_node(n2)
+    network.add_node(n3)
+
+    channel = Channel(bitRate=1000 * 8, propogationDelay=0, errorRate=0)
+    network.add_channel(channel)
+    channel.add_node(n1)
+    channel.add_node(n2)
+    channel.add_node(n3)
+
+    channel.handle_receive_packet(Packet("broadcast", 1, BROADCAST_ID).to_bytes())
+
+    assert len(n1.received) == 0
+    assert len(n2.received) == 1
+    assert len(n3.received) == 1
+    assert n2.received[0].data == "broadcast"
+    assert n3.received[0].data == "broadcast"
+
+
+def test_broadcast_drops_when_error_injection_corrupts_packet():
+    sim = NetworkSim(seed=42, logging=False)
+    network = Network(sim)
+
+    n1 = RecordingNode(1)
+    n2 = RecordingNode(2)
+    n3 = RecordingNode(3)
+    network.add_node(n1)
+    network.add_node(n2)
+    network.add_node(n3)
+
+    channel = Channel(bitRate=1000 * 8, propogationDelay=0, errorRate=1, averageError=2)
+    network.add_channel(channel)
+    channel.add_node(n1)
+    channel.add_node(n2)
+    channel.add_node(n3)
+
+    channel.handle_receive_packet(Packet("broadcast", 1, BROADCAST_ID).to_bytes())
+
+    assert len(n1.received) == 0
+    assert len(n2.received) == 0
+    assert len(n3.received) == 0

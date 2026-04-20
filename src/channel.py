@@ -9,6 +9,7 @@ if TYPE_CHECKING:
   from .network import Network
   from .packet import Packet
 
+BROADCAST_ID = 0xFFFFFFFF
 
 class Channel:
   def __init__(self, maxQueueLength=100,
@@ -18,7 +19,7 @@ class Channel:
                averageError=0, 
                delayVariance=0):
     self._network: Network | None = None
-    self.nodes = {}
+    self.nodes: dict[int, Node] = {}
     self.packetQueue = []
     self.maxQueueLength = maxQueueLength
     self.nextTransmitTime = 0
@@ -83,6 +84,14 @@ class Channel:
     try:
       packet = Packet.from_bytes(packet_bytes)
     except ValueError:
+      return
+
+    if packet.dst == BROADCAST_ID:
+      for id, node in self.nodes.items():
+        if id == packet.src:
+          continue 
+        if node.validate_packet(packet):
+          node.receive(packet)
       return
 
     node = self.nodes.get(packet.dst)
