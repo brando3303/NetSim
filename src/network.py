@@ -1,12 +1,6 @@
 from __future__ import annotations
 
-import heapq
-import random
-import itertools
-
-from dataclasses import dataclass
-from collections import deque
-from typing import TYPE_CHECKING, Callable, Any
+from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
   from .network_sim import NetworkSim
@@ -17,23 +11,23 @@ class Network:
   
   def __init__(self, sim: NetworkSim):
     self.sim = sim
-    self.nodes = []
-    self.channels = []
+    self.nodes: list[Node] = []
+    self.channels: list[Channel] = []
     self.sim.add_network(self)
     self.initialized = False
 
   def init(self):
     if len(self.nodes) == 0:
-      raise Exception("Network must have at least one node.")
-    if self.sim == None:
-      raise Exception("Network must be added to a simulation.")
+      raise RuntimeError("Network must have at least one node.")
+    if self.sim is None:
+      raise RuntimeError("Network must be added to a simulation.")
     for node in self.nodes:
       node.init()
     self.initialized = True
 
   def start(self):
     if not self.initialized:
-      raise Exception("Network must be initialized before starting.")
+      raise RuntimeError("Network must be initialized before starting.")
     for node in self.nodes:
       node.start()
 

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from typing import Callable
-from typing import TYPE_CHECKING
+from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
   from .network import Network
   from .packet import Packet
 
-class Node:
+class Node(ABC):
   def __init__(self, name: int):
     self.name = name
     self.channels = []
@@ -25,17 +25,20 @@ class Node:
           raise ValueError("network cannot be None")
       self._network = value
 
+  @abstractmethod
   def init(self):
-    pass
+    raise NotImplementedError
 
+  @abstractmethod
   def start(self):
-    pass
+    raise NotImplementedError
 
+  @abstractmethod
   def receive(self, packet: Packet):
-    pass
+    raise NotImplementedError
 
   def validate_packet(self, packet: Packet) -> bool:
-    return packet.validate()
+    return True
 
   def set_timer(self, delay: int, callback: Callable, *args, **kwargs):
     self.network.schedule_after(delay, callback, *args, **kwargs)

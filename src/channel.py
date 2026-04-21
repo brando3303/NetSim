@@ -1,8 +1,10 @@
 
 from __future__ import annotations
 
-
+from collections import deque
 from typing import TYPE_CHECKING
+
+from . import packet as pkt
 
 if TYPE_CHECKING:
   from .node import Node
@@ -12,27 +14,27 @@ if TYPE_CHECKING:
 BROADCAST_ID = 0xFFFFFFFF
 
 class Channel:
-  def __init__(self, maxQueueLength=100,
-               bitRate=1000, 
-               propogationDelay=100, 
-               errorRate=0, 
-               averageError=0, 
-               delayVariance=0):
+  def __init__(self, max_queue_length=100,
+               bit_rate=1000, 
+               propogation_delay=100, 
+               error_rate=0, 
+               average_error=0, 
+               delay_variance=0):
     self._network: Network | None = None
     self.nodes: dict[int, Node] = {}
-    self.packetQueue = []
-    self.maxQueueLength = maxQueueLength
-    self.nextTransmitTime = 0
-    self.bitRate = bitRate
-    self.propogationDelay = propogationDelay
-    self.errorRate = errorRate
-    self.averageError = averageError
-    self.delayVariance = delayVariance
+    self.packet_queue = deque()
+    self.max_queue_length = max_queue_length
+    self.next_transmit_time = 0
+    self.bit_rate = bit_rate
+    self.propogation_delay = propogation_delay
+    self.error_rate = error_rate
+    self.average_error = average_error
+    self.delay_variance = delay_variance
 
   @property
   def network(self):
     if self._network is None:
-      raise RuntimeError("Node is not attached to a network")
+      raise RuntimeError("Channel is not attached to a network")
     return self._network
 
   @network.setter
@@ -46,49 +48,50 @@ class Channel:
     if self not in node.channels:
       node.channels.append(self)
 
-  def send(self, packet: Packet):
-    packet_bytes = packet.to_bytes()
+  def send(self, packet: pkt.Packet):
+    packet_bytes = pkt.encode_packet(packet)
 
-    if len(self.packetQueue) >= self.maxQueueLength: #TODO check byte length of queue instead of packet count
+    if len(self.packet_queue) >= self.max_queue_length: #TODO check byte length of queue instead of packet count
       return
-    if len(self.packetQueue) == 0:
-      self.packetQueue.append(packet_bytes)
+    if len(self.packet_queue) == 0:
+      self.packet_queue.append(packet_bytes)
       self.network.schedule_after(0, self.handle_start_transmit)
     else:
-      self.packetQueue.append(packet_bytes)
+      self.packet_queue.append(packet_bytes)
 
 
   # Event Handlers
 
   def handle_start_transmit(self):
-    if len(self.packetQueue) == 0:
+    if len(self.packet_queue) == 0:
       return
-    packet_bytes = self.packetQueue[0]
-    transmitTime = round(len(packet_bytes) * 8 / (self.bitRate / 1000))
-    self.network.schedule_after(transmitTime, self.handle_end_transmit)
+    packet_bytes = self.packet_queue[0]
+    transmit_time = round(len(packet_bytes) * 8 / (self.bit_rate / 1000))
+    self.network.schedule_after(transmit_time, self.handle_end_transmit)
 
   def handle_end_transmit(self):
-    if len(self.packetQueue) == 0:
+    if len(self.packet_queue) == 0:
       return
-    packet_bytes = self.packetQueue.pop(0)
-    final_prop_delay = self.propogationDelay + round(abs(self.network.gauss(0, self.delayVariance)))
+    packet_bytes = self.packet_queue.popleft()
+    final_prop_delay = self.propogation_delay + round(abs(self.network.gauss(0, self.delay_variance)))
     self.network.schedule_after(final_prop_delay, self.handle_receive_packet, packet_bytes)
-    if len(self.packetQueue) > 0:
+    if len(self.packet_queue) > 0:
       self.network.schedule_after(0, self.handle_start_transmit)
 
   def handle_receive_packet(self, packet_bytes: bytes):
-    from .packet import Packet
-
     packet_bytes = self._inject_byte_errors(packet_bytes)
 
+    if not pkt.validate(packet_bytes):
+      return
+
     try:
-      packet = Packet.from_bytes(packet_bytes)
+      packet = pkt.decode_packet(packet_bytes, validate_checksum=False)
     except ValueError:
       return
 
     if packet.dst == BROADCAST_ID:
-      for id, node in self.nodes.items():
-        if id == packet.src:
+      for node_id, node in self.nodes.items():
+        if node_id == packet.src:
           continue 
         if node.validate_packet(packet):
           node.receive(packet)
@@ -97,25 +100,24 @@ class Channel:
     node = self.nodes.get(packet.dst)
     if node is None:
       return
-
+    
     if node.validate_packet(packet):
       node.receive(packet)
-
 
   # Error injection helpers
 
   def _error_probability(self) -> float:
     # Accept either [0,1] ratio or [0,100] percent.
-    if self.errorRate <= 0:
+    if self.error_rate <= 0:
       return 0.0
-    if self.errorRate <= 1:
-      return float(self.errorRate)
-    return min(1.0, float(self.errorRate) / 100.0)
+    if self.error_rate <= 1:
+      return float(self.error_rate)
+    return min(1.0, float(self.error_rate) / 100.0)
 
   def _choose_error_count(self) -> int:
-    if self.averageError <= 0:
+    if self.average_error <= 0:
       return 1
-    count = round(abs(self.network.gauss(self.averageError, max(1.0, self.averageError / 2))))
+    count = round(abs(self.network.gauss(self.average_error, max(1.0, self.average_error / 2))))
     return max(1, count)
 
   def _inject_byte_errors(self, packet_bytes: bytes) -> bytes:

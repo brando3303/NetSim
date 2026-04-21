@@ -1,84 +1,96 @@
 import struct
 import zlib
 from dataclasses import dataclass
-from typing import Any
 
-HEADER_FORMAT = "!IIBI"
+HEADER_FORMAT = "!III"
+HEADER_STRUCT = struct.Struct(HEADER_FORMAT)
+HEADER_LEN = HEADER_STRUCT.size
+MIN_PACKET_LEN = HEADER_LEN + 1
+UINT32_MAX = 0xFFFFFFFF
+
+PAYLOAD_TYPE_BYTES = 0
+PAYLOAD_TYPE_TEXT = 1
 
 
-@dataclass
+@dataclass(slots=True)
 class Packet:
-    def __init__(self, data: Any, src: int, dst: int):
-        self.src = src
-        self.dst = dst
-        self.data = data
-        self.checksum: int | None = None
+    data: bytes | str
+    src: int
+    dst: int
 
-    def to_bytes(self) -> bytes:
-        if self.src < 0 or self.dst < 0:
-            raise ValueError("Packet src and dst must be non-negative integers")
 
-        if isinstance(self.data, bytes):
-            payload_type = 0
-            payload_bytes = self.data
-        else:
-            payload_type = 1
-            payload_bytes = str(self.data).encode("utf-8")
+def _validate_uint32(value: int, name: str) -> None:
+    if not isinstance(value, int):
+        raise TypeError(f"Packet {name} must be an integer")
+    if not 0 <= value <= UINT32_MAX:
+        raise ValueError(f"Packet {name} must be in range [0, {UINT32_MAX}]")
 
-        # header: src(4), dst(4), payload_type(1), payload_len(4)
-        header = struct.pack(HEADER_FORMAT, self.src, self.dst, payload_type, len(payload_bytes))
-        body = header + payload_bytes
-        checksum = zlib.crc32(body) & 0xFFFFFFFF
-        self.checksum = checksum
-        return body + struct.pack("!I", checksum)
 
-    @classmethod
-    def from_bytes(cls, data: bytes) -> "Packet":
-        header_size = struct.calcsize(HEADER_FORMAT)
-        checksum_size = struct.calcsize("!I")
-        if len(data) < header_size + checksum_size:
-            raise ValueError("Packet data too short for header")
+def _encode_payload(data: bytes | str) -> bytes:
+    if isinstance(data, bytes):
+        return bytes([PAYLOAD_TYPE_BYTES]) + data
+    if isinstance(data, str):
+        return bytes([PAYLOAD_TYPE_TEXT]) + data.encode("utf-8")
+    raise TypeError("Packet data must be bytes or str")
 
-        src, dst, payload_type, payload_len = struct.unpack(HEADER_FORMAT, data[:header_size])
-        expected_len = header_size + payload_len + checksum_size
-        if len(data) != expected_len:
-            raise ValueError("Packet data length does not match encoded lengths")
 
-        offset = header_size
-        payload_bytes = data[offset:offset + payload_len]
-        offset += payload_len
-        checksum = struct.unpack("!I", data[offset:offset + checksum_size])[0]
+def _decode_payload(payload: bytes) -> bytes | str:
+    if len(payload) == 0:
+        raise ValueError("Packet payload is missing type marker")
 
-        if payload_type == 0:
-            payload: Any = payload_bytes
-        elif payload_type == 1:
-            payload = payload_bytes.decode("utf-8")
-        else:
-            raise ValueError(f"Unsupported payload type: {payload_type}")
+    payload_type = payload[0]
+    payload_bytes = payload[1:]
+    if payload_type == PAYLOAD_TYPE_BYTES:
+        return payload_bytes
+    if payload_type == PAYLOAD_TYPE_TEXT:
+        return payload_bytes.decode("utf-8")
+    raise ValueError(f"Unsupported payload type: {payload_type}")
 
-        packet = cls(payload, src, dst)
-        packet.checksum = checksum
-        return packet
 
-    def validate(self) -> bool:
-        if self.checksum is None:
-            return False
+def encode_packet(packet: Packet) -> bytes:
+    _validate_uint32(packet.src, "src")
+    _validate_uint32(packet.dst, "dst")
 
-        if self.src < 0 or self.dst < 0:
-            return False
+    encoded_payload = _encode_payload(packet.data)
+    src_dst = struct.pack("!II", packet.src, packet.dst)
+    checksum = zlib.crc32(src_dst + encoded_payload) & UINT32_MAX
+    return HEADER_STRUCT.pack(packet.src, packet.dst, checksum) + encoded_payload
 
-        if isinstance(self.data, bytes):
-            payload_type = 0
-            payload_bytes = self.data
-        else:
-            payload_type = 1
-            payload_bytes = str(self.data).encode("utf-8")
 
-        header = struct.pack(HEADER_FORMAT, self.src, self.dst, payload_type, len(payload_bytes))
-        body = header + payload_bytes
-        computed_checksum = zlib.crc32(body) & 0xFFFFFFFF
-        return computed_checksum == self.checksum
-    
-    def __len__(self):
-        return len(self.to_bytes())
-    
+def decode_packet(data: bytes, *, validate_checksum: bool = True) -> Packet:
+    if len(data) < MIN_PACKET_LEN:
+        raise ValueError("Packet data too short for header")
+
+    src, dst, _ = HEADER_STRUCT.unpack(data[:HEADER_LEN])
+    if validate_checksum and not validate(data):
+        raise ValueError("Packet checksum validation failed")
+
+    payload = data[HEADER_LEN:]
+    return Packet(_decode_payload(payload), src, dst)
+
+
+def validate(data: bytes) -> bool:
+    if len(data) < MIN_PACKET_LEN:
+        return False
+
+    src, dst, checksum = HEADER_STRUCT.unpack(data[:HEADER_LEN])
+    if not 0 <= src <= UINT32_MAX or not 0 <= dst <= UINT32_MAX:
+        return False
+
+    payload = data[HEADER_LEN:]
+    computed = zlib.crc32(struct.pack("!II", src, dst) + payload) & UINT32_MAX
+    return computed == checksum
+
+
+def get_checksum(data: bytes) -> int:
+    if len(data) < HEADER_LEN:
+        raise ValueError("Packet too short for checksum")
+    return HEADER_STRUCT.unpack(data[:HEADER_LEN])[2]
+
+
+def strip_checksum(data: bytes) -> bytes:
+    if len(data) < HEADER_LEN:
+        raise ValueError("Packet too short")
+
+    src, dst, _ = HEADER_STRUCT.unpack(data[:HEADER_LEN])
+    return struct.pack("!II", src, dst) + data[HEADER_LEN:]

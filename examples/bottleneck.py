@@ -48,6 +48,9 @@ class BottleneckNode(Node):
         self.awaiting_ack = False
         self.expected_recv_seq = 1
 
+    def init(self):
+        return None
+
     def start(self):
         # Start stop-and-wait transmission to node n+1.
         self.set_timer(0, self._transmit_tick)
@@ -72,6 +75,9 @@ class BottleneckNode(Node):
         self.set_timer(self.send_interval_ms, self._transmit_tick)
 
     def receive(self, packet: Packet):
+        if not isinstance(packet.data, bytes):
+            return
+
         parsed = self._parse_payload(packet.data)
         if parsed is None:
             return
@@ -109,12 +115,12 @@ def run_single_experiment(queue_length: int) -> RunResult:
     sim = NetworkSim(seed=42, logging=False)
     net = Network(sim)
     ch = Channel(
-        maxQueueLength=queue_length,
-        bitRate=1000 * 8 * 4,
-        propogationDelay=1,
-        errorRate=0,
-        averageError=0,
-        delayVariance=0,
+        max_queue_length=queue_length,
+        bit_rate=1000 * 8 * 60,
+        propogation_delay=1,
+        error_rate=0,
+        average_error=0,
+        delay_variance=0,
     )
 
     print(f"Running experiment with queue_length={queue_length}")

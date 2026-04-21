@@ -9,21 +9,24 @@ class SARNode(Node):
   def __init__(self, name: int):
      super().__init__(name)
      self.messages = 0
+
+  def init(self):
+    return None
   
   def start(self):
     print(f"starting {self.name}")
-    self.channels[0].send(Packet("Hello, World!", self.name, 2))
-    self.network.schedule_after(1000, self.send_timer_message)
+    self.channels[0].send(Packet("Hello, World!", self.name, 0))
+    # self.network.schedule_after(1000, self.send_timer_message)
 
 
   def receive(self, packet):
-    if self.messages < 7:
+    # if self.messages < 2:
       print(f"{self.name} received packet: {packet.data} from {packet.src}")
-      self.channels[0].send(Packet("Ack", self.name, 2))
-      self.messages += 1
+      # self.channels[0].send(Packet("Ack", self.name, 2))
+      # self.messages += 1
 
-  def send_timer_message(self):
-    self.channels[0].send(Packet("Timer message", self.name, 2))
+  # def send_timer_message(self):
+  #   self.channels[0].send(Packet("Timer message", self.name, 2))
 
 
 def main() -> None:
@@ -36,7 +39,7 @@ def main() -> None:
   node2 = SARNode(2)
   net.add_node(node1) #pc net.nodes = [node1]
   net.add_node(node2) #pc net.nodes = [node1, node2]
-  channel = Channel(bitRate=1000*8, propogationDelay=0) #pc channel.net = none
+  channel = Channel(bit_rate=1000*8, propogation_delay=0) #pc channel.net = none
   net.add_channel(channel) #pc net.channels = [channel]
   channel.add_node(node1) #pc channel.nodes = [node1]
   channel.add_node(node2) #pc channel.nodes = [node1, node2], node1.channels = [channel], node2.channels = [channel]
