@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Callable, List
 
 if TYPE_CHECKING:
   from .network import Network
@@ -36,6 +36,9 @@ class Node(ABC):
   @abstractmethod
   def receive(self, packet: Packet):
     raise NotImplementedError
+  
+  def snapshot(self) -> List:
+    return []
 
   def validate_packet(self, packet: Packet) -> bool:
     return True

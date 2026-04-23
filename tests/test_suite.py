@@ -142,6 +142,77 @@ def test_send_respects_channel_queue_limit_and_drops_extra_packets():
     assert len(sim.eventQueue) == 1
 
 
+def test_channel_snapshot_counts_drops_for_queue_overflow():
+    sim, network, channel, n1, n2 = build_basic_topology()
+
+    limited_channel = Channel(
+        max_queue_length=1,
+        bit_rate=channel.bit_rate,
+        propogation_delay=0,
+    )
+    network.add_channel(limited_channel)
+    limited_channel.add_node(n1)
+    limited_channel.add_node(n2)
+
+    limited_channel.send(Packet("first", 1, 2))
+    limited_channel.send(Packet("second", 1, 2))
+
+    assert limited_channel.snapshot() == [0, 1]
+
+
+def test_channel_snapshot_counts_drops_for_corrupt_packets():
+    sim, _network, channel, _n1, _n2 = build_basic_topology(error_rate=1.0, average_error=2)
+
+    channel.handle_receive_packet(encode_packet(Packet("hello", 1, 2)))
+    channel.handle_receive_packet(encode_packet(Packet("hello", 1, 2)))
+
+    assert channel.snapshot() == [0, 2]
+
+
+def test_channel_snapshot_resets_counters():
+    sim, _network, channel, _n1, _n2 = build_basic_topology(error_rate=1.0, average_error=2)
+
+    channel.handle_receive_packet(encode_packet(Packet("hello", 1, 2)))
+    channel.snapshot()  # consume and reset
+
+    assert channel.snapshot() == [0, 0]
+
+
+def test_channel_snapshot_counts_throughput_for_unicast():
+    sim, _network, channel, _n1, _n2 = build_basic_topology(error_rate=0.0)
+
+    channel.handle_receive_packet(encode_packet(Packet("hello", 1, 2)))
+    channel.handle_receive_packet(encode_packet(Packet("hello", 1, 2)))
+
+    assert channel.snapshot() == [2, 0]
+
+
+def test_channel_snapshot_counts_throughput_for_broadcast_once_per_packet():
+    sim = NetworkSim(seed=42, logging=False)
+    network = Network(sim)
+
+    n1 = RecordingNode(1)
+    n2 = RecordingNode(2)
+    n3 = RecordingNode(3)
+    network.add_node(n1)
+    network.add_node(n2)
+    network.add_node(n3)
+
+    channel = Channel(
+        bit_rate=1000 * 8,
+        propogation_delay=0,
+        error_rate=0,
+    )
+    network.add_channel(channel)
+    channel.add_node(n1)
+    channel.add_node(n2)
+    channel.add_node(n3)
+
+    channel.handle_receive_packet(encode_packet(Packet("broadcast", 1, BROADCAST_ID)))
+
+    assert channel.snapshot() == [1, 0]
+
+
 def test_channel_delivers_when_packet_is_valid():
     _sim, _network, channel, n1, n2 = build_basic_topology()
     packet_bytes = encode_packet(Packet("ok", 1, 2))

@@ -30,6 +30,8 @@ class Channel:
     self.error_rate = error_rate
     self.average_error = average_error
     self.delay_variance = delay_variance
+    self._current_drops: int = 0
+    self._current_throughput: int = 0
 
   @property
   def network(self):
@@ -52,6 +54,7 @@ class Channel:
     packet_bytes = pkt.encode_packet(packet)
 
     if len(self.packet_queue) >= self.max_queue_length: #TODO check byte length of queue instead of packet count
+      self._record_drop()
       return
     if len(self.packet_queue) == 0:
       self.packet_queue.append(packet_bytes)
@@ -73,7 +76,11 @@ class Channel:
     if len(self.packet_queue) == 0:
       return
     packet_bytes = self.packet_queue.popleft()
-    final_prop_delay = self.propogation_delay + round(abs(self.network.gauss(0, self.delay_variance)))
+    if self.delay_variance > 0:
+      extra_delay = round(abs(self.network.gauss(0, self.delay_variance)))
+    else:
+      extra_delay = 0
+    final_prop_delay = self.propogation_delay + extra_delay
     self.network.schedule_after(final_prop_delay, self.handle_receive_packet, packet_bytes)
     if len(self.packet_queue) > 0:
       self.network.schedule_after(0, self.handle_start_transmit)
@@ -82,27 +89,40 @@ class Channel:
     packet_bytes = self._inject_byte_errors(packet_bytes)
 
     if not pkt.validate(packet_bytes):
+      self._record_drop()
       return
 
     try:
       packet = pkt.decode_packet(packet_bytes, validate_checksum=False)
     except ValueError:
+      self._record_drop()
       return
 
     if packet.dst == BROADCAST_ID:
+      delivered_any = False
       for node_id, node in self.nodes.items():
         if node_id == packet.src:
           continue 
         if node.validate_packet(packet):
           node.receive(packet)
+          delivered_any = True
+      if not delivered_any:
+        self._record_drop()
+      else:
+        self._record_throughput()
       return
 
     node = self.nodes.get(packet.dst)
     if node is None:
+      self._record_drop()
       return
     
     if node.validate_packet(packet):
       node.receive(packet)
+      self._record_throughput()
+      return
+
+    self._record_drop()
 
   # Error injection helpers
 
@@ -140,4 +160,17 @@ class Channel:
 
     return bytes(corrupted)
 
+  def _record_drop(self):
+    self._current_drops += 1
 
+  def _record_throughput(self):
+    self._current_throughput += 1
+
+  # Analytics
+
+  def snapshot(self) -> list[int]:
+    """Return [throughput, drops] since last snapshot and reset counters."""
+    result = [self._current_throughput, self._current_drops]
+    self._current_throughput = 0
+    self._current_drops = 0
+    return result

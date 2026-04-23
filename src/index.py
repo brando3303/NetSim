@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
 	from .channel import Channel as Channel
 	from .network import Network as Network
-	from .network_sim import Event as Event
 	from .network_sim import NetworkSim as NetworkSim
 	from .node import Node as Node
 	from .packet import Packet as Packet
@@ -18,7 +17,6 @@ _EXPORTS = {
 	"Channel": ("channel", "Channel"),
 	"Network": ("network", "Network"),
 	"NetworkSim": ("network_sim", "NetworkSim"),
-	"Event": ("network_sim", "Event"),
 	"Node": ("node", "Node"),
 	"Packet": ("packet", "Packet"),
 }
@@ -27,7 +25,6 @@ __all__ = (
 	"Channel",
 	"Network",
 	"NetworkSim",
-	"Event",
 	"Node",
 	"Packet",
 )

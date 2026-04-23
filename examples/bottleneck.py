@@ -47,6 +47,8 @@ class BottleneckNode(Node):
         self.next_send_seq = 1
         self.awaiting_ack = False
         self.expected_recv_seq = 1
+        self.min_send_interval_ms = max(1, send_interval_ms)
+        self.max_send_interval_ms = self.min_send_interval_ms * 4
 
     def init(self):
         return None
@@ -72,7 +74,19 @@ class BottleneckNode(Node):
         payload = self._build_payload(PAYLOAD_KIND_DATA, self.next_send_seq)
         self.channels[0].send(Packet(payload, self.name, self.next_node_id))
         self.awaiting_ack = True
-        self.set_timer(self.send_interval_ms, self._transmit_tick)
+        next_interval_ms = self._send_interval_for_time(self.network.sim.time)
+        self.set_timer(next_interval_ms, self._transmit_tick)
+
+    def _send_interval_for_time(self, sim_time_ms: int) -> int:
+        # Triangle profile centered at 1000 ms:
+        # slow start -> fastest at 1000 ms -> slow again afterwards.
+        ramp_distance_ms = 3000
+        distance_from_peak = abs(sim_time_ms - 3000)
+        normalized = min(1.0, distance_from_peak / ramp_distance_ms)
+        interval = self.min_send_interval_ms + (
+            self.max_send_interval_ms - self.min_send_interval_ms
+        ) * normalized
+        return max(1, int(round(interval)))
 
     def receive(self, packet: Packet):
         if not isinstance(packet.data, bytes):
