@@ -39,7 +39,7 @@ def main() -> None:
   node2 = SARNode(2)
   net.add_node(node1) #pc net.nodes = [node1]
   net.add_node(node2) #pc net.nodes = [node1, node2]
-  channel = Channel(bit_rate=1000*8, propogation_delay=0) #pc channel.net = none
+  channel = Channel(bit_rate=1000*8, propagation_delay=0) #pc channel.net = none
   net.add_channel(channel) #pc net.channels = [channel]
   channel.add_node(node1) #pc channel.nodes = [node1]
   channel.add_node(node2) #pc channel.nodes = [node1, node2], node1.channels = [channel], node2.channels = [channel]

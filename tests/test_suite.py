@@ -55,7 +55,7 @@ def build_basic_topology(
 
     channel = Channel(
         bit_rate=bit_rate,
-        propogation_delay=prop_delay,
+        propagation_delay=prop_delay,
         error_rate=int(error_rate),
         average_error=average_error,
     )
@@ -130,7 +130,7 @@ def test_network_start_requires_init_first():
 def test_send_respects_channel_queue_limit_and_drops_extra_packets():
     sim, network, channel, _n1, _n2 = build_basic_topology()
 
-    limited_channel = Channel(max_queue_length=1, bit_rate=channel.bit_rate, propogation_delay=0)
+    limited_channel = Channel(max_queue_length=1, bit_rate=channel.bit_rate, propagation_delay=0)
     network.add_channel(limited_channel)
     limited_channel.add_node(_n1)
     limited_channel.add_node(_n2)
@@ -148,7 +148,7 @@ def test_channel_snapshot_counts_drops_for_queue_overflow():
     limited_channel = Channel(
         max_queue_length=1,
         bit_rate=channel.bit_rate,
-        propogation_delay=0,
+        propagation_delay=0,
     )
     network.add_channel(limited_channel)
     limited_channel.add_node(n1)
@@ -200,7 +200,7 @@ def test_channel_snapshot_counts_throughput_for_broadcast_once_per_packet():
 
     channel = Channel(
         bit_rate=1000 * 8,
-        propogation_delay=0,
+        propagation_delay=0,
         error_rate=0,
     )
     network.add_channel(channel)
@@ -286,7 +286,7 @@ def test_full_simulation_start_init_and_delivery_flow():
     network.add_node(sender)
     network.add_node(receiver)
 
-    channel = Channel(bit_rate=1000 * 8, propogation_delay=0, error_rate=0)
+    channel = Channel(bit_rate=1000 * 8, propagation_delay=0, error_rate=0)
     network.add_channel(channel)
     channel.add_node(sender)
     channel.add_node(receiver)
@@ -322,7 +322,7 @@ def test_broadcast_delivers_to_all_nodes_except_source():
     network.add_node(n2)
     network.add_node(n3)
 
-    channel = Channel(bit_rate=1000 * 8, propogation_delay=0, error_rate=0)
+    channel = Channel(bit_rate=1000 * 8, propagation_delay=0, error_rate=0)
     network.add_channel(channel)
     channel.add_node(n1)
     channel.add_node(n2)
@@ -348,7 +348,7 @@ def test_broadcast_drops_when_error_injection_corrupts_packet():
     network.add_node(n2)
     network.add_node(n3)
 
-    channel = Channel(bit_rate=1000 * 8, propogation_delay=0, error_rate=1, average_error=2)
+    channel = Channel(bit_rate=1000 * 8, propagation_delay=0, error_rate=1, average_error=2)
     network.add_channel(channel)
     channel.add_node(n1)
     channel.add_node(n2)

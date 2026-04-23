@@ -36,7 +36,7 @@ def run_histogram_experiment() -> tuple[list[int], list[int], int]:
 	ch = Channel(
 		max_queue_length=QUEUE_LENGTH,
 		bit_rate=LOW_BIT_RATE,
-		propogation_delay=2,
+		propagation_delay=2,
 		error_rate=0,
 		average_error=0,
 		delay_variance=0,

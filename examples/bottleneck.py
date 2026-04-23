@@ -131,7 +131,7 @@ def run_single_experiment(queue_length: int) -> RunResult:
     ch = Channel(
         max_queue_length=queue_length,
         bit_rate=1000 * 8 * 60,
-        propogation_delay=1,
+        propagation_delay=1,
         error_rate=0,
         average_error=0,
         delay_variance=0,

@@ -16,7 +16,7 @@ BROADCAST_ID = 0xFFFFFFFF
 class Channel:
   def __init__(self, max_queue_length=100,
                bit_rate=1000, 
-               propogation_delay=100, 
+               propagation_delay=100, 
                error_rate=0, 
                average_error=0, 
                delay_variance=0):
@@ -26,7 +26,7 @@ class Channel:
     self.max_queue_length = max_queue_length
     self.next_transmit_time = 0
     self.bit_rate = bit_rate
-    self.propogation_delay = propogation_delay
+    self.propagation_delay = propagation_delay
     self.error_rate = error_rate
     self.average_error = average_error
     self.delay_variance = delay_variance
@@ -76,11 +76,7 @@ class Channel:
     if len(self.packet_queue) == 0:
       return
     packet_bytes = self.packet_queue.popleft()
-    if self.delay_variance > 0:
-      extra_delay = round(abs(self.network.gauss(0, self.delay_variance)))
-    else:
-      extra_delay = 0
-    final_prop_delay = self.propogation_delay + extra_delay
+    final_prop_delay = self.propagation_delay + round(abs(self.network.gauss(0, self.delay_variance)))
     self.network.schedule_after(final_prop_delay, self.handle_receive_packet, packet_bytes)
     if len(self.packet_queue) > 0:
       self.network.schedule_after(0, self.handle_start_transmit)
