@@ -1,74 +1,67 @@
 # NetSim
 
-NetSim is a discrete-event network simulator for testing protocols over unreliable links.
-It models nodes connected by channels with configurable bitrate, propagation delay, queue limits,
-and error injection.
+NetSim is a discrete-event network simulator built to stress-test protocol behavior on unreliable links.
+It provides a compact, extensible framework for modeling packet transport under queue pressure, delay, and corruption.
 
-## Current State
 
-- Core simulation engine with event scheduling and reproducible RNG seed support
-- Packet wire format with checksum validation (`src`, `dst`, `checksum`, typed payload)
-- Channel queueing, transmission timing, propagation delay, and byte-level error injection
-- Unicast + broadcast delivery (`BROADCAST_ID = 0xFFFFFFFF`)
-- Analytics snapshots for nodes/channels via `snapshot()`
-- Example workloads for bottleneck analysis and plotting
-- Test suite currently contains 23 tests
+- Performance-oriented core with a heap-based event engine and focused profiling workflow
+- Clear systems design: modular simulation engine, network model, channel model, and packet layer
+- Reliability-focused packet handling with checksum validation and typed payload support
+- Built-in observability through snapshot-based throughput and drop analytics
+- Practical experiments included for bottleneck analysis and visualization
+- Solid verification baseline with 23 automated tests
 
-## Project Layout
+## Technical Highlights
 
-- `src/network_sim.py`: event queue, run loop, scheduling helpers, analytics collection
-- `src/network.py`: network container and helper API exposed to nodes/channels
-- `src/node.py`: abstract node base class (`init`, `start`, `receive`, optional `snapshot`)
-- `src/channel.py`: channel behavior (queue, delay, errors, delivery, channel snapshot stats)
-- `src/packet.py`: packet model and encode/decode/validate utilities
-- `src/index.py`: convenient public imports for core types
-- `examples/bottleneck.py`: queue-length experiment with stop-and-wait traffic
-- `examples/bottleneck_plot.py`: throughput/drop analytics plotting example
-- `tests/test_suite.py`: unit/integration-style behavior checks
+- Event-driven simulator with seeded RNG for reproducible runs
+- Channel-level modeling of:
+	- transmission time (bitrate-aware)
+	- propagation delay and optional variance
+	- queue overflow behavior
+	- byte-level error injection
+- Delivery semantics:
+	- unicast to destination node
+	- broadcast using `BROADCAST_ID = 0xFFFFFFFF`
+- Packet wire format:
+	- `src | dst | checksum | typed payload`
+
+## Architecture
+
+- `src/network_sim.py`: event scheduling, run loop, analytics orchestration
+- `src/network.py`: network composition and simulation helper API
+- `src/node.py`: abstract node contract (`init`, `start`, `receive`, optional `snapshot`)
+- `src/channel.py`: queueing, transport behavior, delivery, and per-window channel counters
+- `src/packet.py`: packet dataclass plus encode/decode/validate helpers
+- `src/index.py`: single import surface for core public types
 
 ## Quick Start
-
-### 1) Create and activate a virtual environment
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-```
 
-### 2) Install dependencies
-
-```powershell
 python -m pip install -U pip
 python -m pip install matplotlib numpy pytest
-```
 
-### 3) Run the demo simulation
-
-```powershell
 python .\main.py
-```
-
-### 4) Run the test suite
-
-```powershell
 python -m pytest tests/test_suite.py -q
 ```
 
-## Basic Usage
+## Example Usage
 
 ```python
 from src.index import NetworkSim, Network, Channel, Node, Packet
 
 
 class MyNode(Node):
-	def init(self):
-		pass
+		def init(self):
+				pass
 
-	def start(self):
-		self.channels[0].send(Packet("hello", self.name, 2))
+		def start(self):
+				self.channels[0].send(Packet("hello", self.name, 2))
 
-	def receive(self, packet: Packet):
-		print(self.name, packet.src, packet.data)
+		def receive(self, packet: Packet):
+				print(self.name, packet.src, packet.data)
 
 
 sim = NetworkSim(seed=42, logging=False)
@@ -87,27 +80,20 @@ ch.add_node(n2)
 sim.start()
 ```
 
-## Analytics
+## Analytics and Experiments
 
-If `NetworkSim(track_analytics=True, snapshot_interval=...)` is enabled, snapshots are
-collected periodically while the simulation runs.
+Enable analytics with `NetworkSim(track_analytics=True, snapshot_interval=...)`.
 
-- `Node.snapshot()` defaults to `[]`; override in custom node classes for metrics
+- `Node.snapshot()` can be overridden for node-level metrics
 - `Channel.snapshot()` returns `[throughput_since_last_snapshot, drops_since_last_snapshot]`
-- `sim.node_analytics` stores per-snapshot element-wise sums of node snapshots
-- `sim.channel_analytics` stores per-snapshot element-wise sums of channel snapshots
+- `sim.node_analytics` stores per-snapshot, element-wise node metric aggregates
+- `sim.channel_analytics` stores per-snapshot, element-wise channel metric aggregates
 
-Example:
+Included examples:
 
-```python
-sim = NetworkSim(seed=13, logging=False, track_analytics=True, snapshot_interval=100)
-# ... build and run network ...
-
-throughput_series = [snap[0] for snap in sim.channel_analytics]
-drop_series = [snap[1] for snap in sim.channel_analytics]
-```
+- `examples/bottleneck.py`: queue-length sensitivity experiment across 30 nodes
+- `examples/bottleneck_plot.py`: time-window visualization of throughput vs drops
 
 ## Notes
 
-- `NetworkSim` prints final run stats (sim time, events processed, wall time, events/sec).
-- Event tie ordering for identical timestamps is currently randomized.
+- `NetworkSim` prints run statistics after completion (simulation time, events processed, wall time, events/second).
