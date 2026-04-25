@@ -36,7 +36,7 @@ def main():
         receiver=2,
         data=payload,
         window_size=10,
-        frame_size=40,
+        frame_size=4,
         retransmit_timeout=8,
         seq_space=seq_space,
     )
@@ -54,8 +54,8 @@ def main():
     channel = Channel(
         bit_rate=1000 * 8*100,
         propagation_delay=3,
-        delay_variance=200,
-        error_rate=50,
+        delay_variance=0,
+        error_rate=5,
     )
     network.add_channel(channel)
     channel.add_node(server)
