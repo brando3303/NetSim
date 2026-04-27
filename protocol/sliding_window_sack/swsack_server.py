@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from src.node import Node
-from src.packet import Packet
+from src.packet import Packet, packet_length
 
 from .common import SackBlock, decode_sack_payload, encode_sw_payload
 
@@ -136,6 +136,7 @@ class SWSACKServer(Node):
 			src=self.name,
 			dst=self.receiver,
 		)
+		print(f"packet size: {packet_length(packet)} bytes")
 		self.channels[0].send(packet)
 		self.set_timer(self.retransmit_timeout, self.retransmit_timer, seq_num)
 
