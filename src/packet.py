@@ -94,3 +94,9 @@ def strip_checksum(data: bytes) -> bytes:
 
     src, dst, _ = HEADER_STRUCT.unpack(data[:HEADER_LEN])
     return struct.pack("!II", src, dst) + data[HEADER_LEN:]
+
+
+def packet_length(packet: Packet) -> int:
+    return HEADER_LEN + 1 + (
+        len(packet.data) if isinstance(packet.data, bytes) else len(packet.data)
+    )
