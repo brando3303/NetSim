@@ -8,13 +8,18 @@ and acks are on the wire at the same time.
 
 frames are 31 bytes for packets, and 24 bytes for acks, 
 so for one seq we need 55 bytes on the wire
-
+example:
 delay = 3 ms
 bit rate = 30KBps = 240B/ms
 so Bandwidth-delay product is 3ms * 240B/ms = 720 bytes
 
 720/55 = 13.09, so the optimal window size is around 13/2 = 6.5 packets
-which can be seen in the plot.
+
+This leads to the necessity of Ack clocking so that the sender
+can adjust its rate based on roundtrips observed.
+Importantly, the channel's queue size is also a limiting factor, and later 
+improvements will be needed to improve this, specifically tracking RTTs
+to adjust timeouts and window sizes.  
 """
 
 
@@ -45,10 +50,10 @@ PAYLOAD = _HEADER + _CHUNK * 4
 
 SEQ_SPACE = 1001
 FRAME_SIZE = 2
-RETRANSMIT_TIMEOUT = 20
-BIT_RATE = 1000 * 8 * 30
-PROPAGATION_DELAY = 3
-DELAY_VARIANCE = 2
+RETRANSMIT_TIMEOUT = 100
+BIT_RATE = 1000 * 8 * 10
+PROPAGATION_DELAY = 6
+DELAY_VARIANCE = 0
 ERROR_RATE = 0
 WINDOW_SIZES = list(range(1, 60, 1))
 PLOT_OUTPUT = Path(__file__).with_name("window_size_completion_time.png")
@@ -83,7 +88,7 @@ def run_trial(window_size: int, seed: int = 8) -> tuple[int, bool]:
         propagation_delay=PROPAGATION_DELAY,
         delay_variance=DELAY_VARIANCE,
         error_rate=ERROR_RATE,
-        max_queue_length=10
+        max_queue_length=100
     )
     network.add_channel(channel)
     channel.add_node(server)

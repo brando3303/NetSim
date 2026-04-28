@@ -89,8 +89,7 @@ class SWSACKServer(Node):
 			self.retransmit_next_block()
 
 	def process_ack(self, ack_seq: int):
-		# if ack_seq > self.last_ack_received:
-		# TODO fix this...
+		# if ack_seq > self.last_ack_received
 		self.ack_block((self.last_ack_received + 1) % self.seq_space, ack_seq)
 		entry = self.window.get(ack_seq)
 		if entry is None:
@@ -108,7 +107,6 @@ class SWSACKServer(Node):
 				break
 
 			self.last_ack_received = next_seq
-			print(f"Server slid window to LAS={self.last_ack_received}")
 			del self.window[next_seq]
 
 			next_chunk = self.next_data()
@@ -130,13 +128,11 @@ class SWSACKServer(Node):
 		return next_chunk
 
 	def send_frame(self, seq_num: int, payload: bytes):
-		print(f"Server sending packet with seq_num={seq_num}, payload={payload}")
 		packet = Packet(
 			data=encode_sw_payload(seq_num, payload),
 			src=self.name,
 			dst=self.receiver,
 		)
-		print(f"packet size: {packet_length(packet)} bytes")
 		self.channels[0].send(packet)
 		self.set_timer(self.retransmit_timeout, self.retransmit_timer, seq_num)
 

@@ -50,6 +50,7 @@ SWSACKServer
     * If sackBlocks.length \> 0  
       * retransmitNextBlock()  
   * processAck(ack):  
+    * ackBlock((LAS \+ 1\) % seqSpace, ack.seqNum)  
     * If window\[ack.seqNum\] does not exist, return  
     * set window\[ack.seqnum\] \= (True, ” )  
   * processSackBlock(sackBlock):  
