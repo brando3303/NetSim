@@ -53,7 +53,6 @@ class Channel:
   def send(self, packet: pkt.Packet):
     
     packet_bytes = pkt.encode_packet(packet)
-    print(f"packet legnth: {len(packet_bytes)} bytes")
 
     if len(self.packet_queue) >= self.max_queue_length: #TODO check byte length of queue instead of packet count
       self._record_drop()

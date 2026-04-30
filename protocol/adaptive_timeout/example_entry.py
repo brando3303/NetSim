@@ -11,35 +11,36 @@ from src.channel import Channel
 from src.network import Network
 from src.network_sim import NetworkSim
 
-from protocol.sliding_window_sack.swsack_client import SWSACKClient
-from protocol.sliding_window_sack.swsack_server import SWSACKServer
+from protocol.adaptive_timeout.at_client import ATClient
+from protocol.adaptive_timeout.at_server import ATServer
 
 
 def main():
     payload = (
-        b"Sliding-window SACK demo payload. "
+        b"Adaptive-timeout SACK demo payload. "
         b"This should be reconstructed exactly at the client."
-        b"0000000000000000000000000000000000000000000000000000"
-        b"0000000000000000000000000000000000000000000000000000"
         b"0000000000000000000000000000000000000000000000000000"
         b"0000000000000000000000000000000000000000000000000000"
     )
 
     seq_space = 1001
+    snapshot_interval = 50
 
-    sim = NetworkSim(seed=7, logging=False)
+    sim = NetworkSim(seed=7, logging=False, track_analytics=True, snapshot_interval=snapshot_interval)
     network = Network(sim)
 
-    server = SWSACKServer(
+    server = ATServer(
         name=1,
         receiver=2,
         data=payload,
         window_size=10,
         frame_size=4,
-        retransmit_timeout=8,
+        retransmit_timeout=1000,
         seq_space=seq_space,
+        min_rto=100,
+        max_rto=10000,
     )
-    client = SWSACKClient(
+    client = ATClient(
         name=2,
         server=1,
         buffer_window_size=10,
@@ -51,10 +52,10 @@ def main():
     network.add_node(client)
 
     channel = Channel(
-        bit_rate=1000 * 8*100,
-        propagation_delay=4,
+        bit_rate=1000 * 8 * 100,
+        propagation_delay=5,
         delay_variance=0,
-        error_rate=0
+        error_rate=30,
     )
     network.add_channel(channel)
     channel.add_node(server)
@@ -66,8 +67,14 @@ def main():
     print(f"Delivered bytes: {len(reconstructed)}")
     print(f"Server complete: {server.is_complete()}")
     print(f"Payload matches: {reconstructed == payload}")
-    print(reconstructed.decode("utf-8"))
+    print(f"Final adaptive RTO: {server.retransmit_timeout} ms")
+    print(f"Analytics snapshots collected: {len(sim.node_analytics)}")
+    if sim.node_analytics:
+        print(f"First snapshot: {sim.node_analytics[0]}")
+        print(f"Last snapshot: {sim.node_analytics[-1]}")
+    
+    return sim, snapshot_interval
 
 
 if __name__ == "__main__":
-    main()
+    sim, _ = main()

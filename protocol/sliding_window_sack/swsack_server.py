@@ -184,7 +184,7 @@ class SWSACKServer(Node):
 				break
 
 			self.channels[0].send(current.packet)
-			self.set_timer(self.retransmit_timeout, self.retransmit_timer, i)
+			#self.set_timer(self.retransmit_timeout, self.retransmit_timer, i)
 
 			i = (i + 1) % self.seq_space
 			if not self.is_in_window(i):
