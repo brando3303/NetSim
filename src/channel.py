@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections import deque
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from . import packet as pkt
 
@@ -19,7 +19,8 @@ class Channel:
                propagation_delay=100, 
                error_rate=0, 
                average_error=0, 
-               delay_variance=0):
+               delay_variance=0,
+               propagation_delay_fn: Callable[[int], int | float] | None = None):
     self._network: Network | None = None
     self.nodes: dict[int, Node] = {}
     self.packet_queue = deque()
@@ -27,6 +28,7 @@ class Channel:
     self.next_transmit_time = 0
     self.bit_rate = bit_rate
     self.propagation_delay = propagation_delay
+    self.propagation_delay_fn = propagation_delay_fn
     self.error_rate = error_rate
     self.average_error = average_error
     self.delay_variance = delay_variance
@@ -53,7 +55,6 @@ class Channel:
   def send(self, packet: pkt.Packet):
     
     packet_bytes = pkt.encode_packet(packet)
-    print(f"packet legnth: {len(packet_bytes)} bytes")
 
     if len(self.packet_queue) >= self.max_queue_length: #TODO check byte length of queue instead of packet count
       self._record_drop()
@@ -78,10 +79,18 @@ class Channel:
     if len(self.packet_queue) == 0:
       return
     packet_bytes = self.packet_queue.popleft()
-    final_prop_delay = self.propagation_delay + round(abs(self.network.gauss(0, self.delay_variance)))
+    base_delay = self._resolve_propagation_delay()
+    final_prop_delay = base_delay + round(abs(self.network.gauss(0, self.delay_variance)))
     self.network.schedule_after(final_prop_delay, self.handle_receive_packet, packet_bytes)
     if len(self.packet_queue) > 0:
       self.network.schedule_after(0, self.handle_start_transmit)
+
+  def _resolve_propagation_delay(self) -> int:
+    if self.propagation_delay_fn is None:
+      return max(0, int(self.propagation_delay))
+
+    delay_value = self.propagation_delay_fn(int(self.network.sim.time))
+    return max(0, int(round(delay_value)))
 
   def handle_receive_packet(self, packet_bytes: bytes):
     packet_bytes = self._inject_byte_errors(packet_bytes)

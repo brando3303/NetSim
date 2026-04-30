@@ -1,20 +1,23 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import List
 
 from src.node import Node
-from src.packet import Packet, packet_length
+from src.packet import Packet
 
 from .common import SackBlock, decode_sack_payload, encode_sw_payload
 
 
 @dataclass(slots=True)
 class _WindowEntry:
-	acked: bool
-	packet: Packet
+  acked: bool
+  packet: Packet
+  time_sent: int
+  retransmitted: bool
 
 
-class SWSACKServer(Node):
+class ATServer(Node):
 	def __init__(
 		self,
 		name: int,
@@ -25,6 +28,8 @@ class SWSACKServer(Node):
 		frame_size: int,
 		retransmit_timeout: int,
 		seq_space: int = 256,
+		min_rto: int = 20,
+		max_rto: int = 2000,
 	):
 		super().__init__(name)
 		if window_size <= 0:
@@ -37,6 +42,10 @@ class SWSACKServer(Node):
 			raise ValueError("frame_size must be > 0")
 		if retransmit_timeout <= 0:
 			raise ValueError("retransmit_timeout must be > 0")
+		if min_rto <= 0:
+			raise ValueError("min_rto must be > 0")
+		if max_rto < min_rto:
+			raise ValueError("max_rto must be >= min_rto")
 
 		self.seq_space = seq_space
 		self.window_size = window_size
@@ -49,7 +58,16 @@ class SWSACKServer(Node):
 		self.data = data.encode("utf-8") if isinstance(data, str) else bytes(data)
 		self.data_index = 0
 		self.frame_size = frame_size
-		self.retransmit_timeout = retransmit_timeout
+
+		self.min_rto = min_rto
+		self.max_rto = max_rto
+		self.retransmit_timeout = self._clamp_rto(retransmit_timeout)
+		self.smoothed_round_trip_time = -1
+		self.smoothed_variance = -1
+
+		self.rto_timer_running = False
+		self.fr_num_acks = 0
+		self.fr_last_seen_seq = None
 
 	def init(self):
 		return None
@@ -59,9 +77,16 @@ class SWSACKServer(Node):
 			next_chunk = self.next_data()
 			if len(next_chunk) == 0:
 				break
+
 			next_seq = (self.last_frame_sent + 1) % self.seq_space
 			self.send_frame(next_seq, next_chunk)
 			self.last_frame_sent = next_seq
+
+		if not self.rto_timer_running:
+			self.set_timer(self.retransmit_timeout, self.retransmit_timer)
+			self.rto_timer_running = True
+
+		
 
 	def receive(self, packet: Packet):
 		if packet.src != self.receiver:
@@ -72,16 +97,29 @@ class SWSACKServer(Node):
 			return
 
 		ack_seq, sack_blocks = decoded
-		print(f"Server received ACK for seq_num={ack_seq} with SACK blocks={sack_blocks}")
 		self.handle_ack_packet(ack_seq, sack_blocks)
 
 	def handle_ack_packet(self, ack_seq: int, sack_blocks: list[SackBlock]):
+		# increase fast retransmit counter even if ACK is correct
 		if not self.is_in_window(ack_seq):
 			return
+
 
 		self.process_ack(ack_seq)
 		for sack_block in sack_blocks:
 			self.process_sack_block(sack_block)
+
+		if self.fr_last_seen_seq == ack_seq:
+			self.fr_num_acks += 1
+			if self.fr_num_acks == 3:
+				print(f"FAST RETRANSMIT triggered for seq {ack_seq} at time {self._network_time()}")
+				entry = self.window.get(ack_seq)
+				if entry is not None and not entry.acked:
+					self.channels[0].send(entry.packet)
+					entry.retransmitted = True
+		else:
+			self.fr_num_acks = 1
+			self.fr_last_seen_seq = ack_seq
 
 		self.update_window()
 
@@ -89,11 +127,19 @@ class SWSACKServer(Node):
 			self.retransmit_next_block()
 
 	def process_ack(self, ack_seq: int):
-		# if ack_seq > self.last_ack_received
-		self.ack_block((self.last_ack_received + 1) % self.seq_space, ack_seq)
 		entry = self.window.get(ack_seq)
+		print(f"ACK entry={entry}")
 		if entry is None:
 			return
+
+		if not entry.retransmitted and not entry.acked:
+			rtt = self._network_time() - entry.time_sent
+			if rtt >= 0:
+				self.update_timeout(rtt)
+			
+		self.ack_block((self.last_ack_received + 1) % self.seq_space, ack_seq)
+
+
 		entry.acked = True
 
 	def process_sack_block(self, sack_block: SackBlock):
@@ -106,6 +152,8 @@ class SWSACKServer(Node):
 			if entry is None or not entry.acked:
 				break
 
+			self.fr_num_acks = 0
+			
 			self.last_ack_received = next_seq
 			del self.window[next_seq]
 
@@ -134,21 +182,29 @@ class SWSACKServer(Node):
 			dst=self.receiver,
 		)
 		self.channels[0].send(packet)
-		self.set_timer(self.retransmit_timeout, self.retransmit_timer, seq_num)
 
 		if seq_num not in self.window:
-			self.window[seq_num] = _WindowEntry(acked=False, packet=packet)
+			self.window[seq_num] = _WindowEntry(
+				acked=False,
+				packet=packet,
+				time_sent=self._network_time(),
+				retransmitted=False,
+			)
 
-	def retransmit_timer(self, seq_num: int):
-		if not self.is_in_window(seq_num):
+	def retransmit_timer(self):
+		earliest_seq = (self.last_ack_received + 1) % self.seq_space
+		if not self.is_in_window(earliest_seq):
 			return
 
-		entry = self.window.get(seq_num)
+		entry = self.window.get(earliest_seq)
 		if entry is None or entry.acked:
 			return
 
 		self.channels[0].send(entry.packet)
-		self.set_timer(self.retransmit_timeout, self.retransmit_timer, seq_num)
+		entry.retransmitted = True
+		print(f"RETRANS seq {earliest_seq} at time {self._network_time()} with RTO {self.retransmit_timeout}")
+		self.retransmit_timeout = min(self.max_rto, max(self.min_rto, 2 * self.retransmit_timeout))
+		self.set_timer(self.retransmit_timeout, self.retransmit_timer)
 
 	def is_in_window(self, seq_num: int) -> bool:
 		return 0 < self.seq_dist(self.last_ack_received, seq_num) <= self.window_size
@@ -159,6 +215,7 @@ class SWSACKServer(Node):
 	def ack_block(self, sle: int, sre: int):
 		if self.seq_dist(sle, sre) > self.seq_space // 2:
 			return
+
 		i = sle % self.seq_space
 		while i != sre % self.seq_space:
 			if self.is_in_window(i):
@@ -184,13 +241,39 @@ class SWSACKServer(Node):
 				break
 
 			self.channels[0].send(current.packet)
-			#self.set_timer(self.retransmit_timeout, self.retransmit_timer, i)
+			current.retransmitted = True
 
 			i = (i + 1) % self.seq_space
 			if not self.is_in_window(i):
 				break
+
 			next_entry = self.window.get(i)
 			in_unacked_block = next_entry is not None and not next_entry.acked
 
+	def update_timeout(self, rtt: int):
+
+		if self.smoothed_round_trip_time < 0:
+			self.smoothed_round_trip_time = float(rtt)
+			self.smoothed_variance = float(rtt) / 2
+			return
+   
+		rtt_f = float(rtt)
+		old = self.retransmit_timeout
+		self.smoothed_variance = 0.9 * self.smoothed_variance + 0.1 * abs(self.smoothed_round_trip_time - rtt_f)
+		self.smoothed_round_trip_time = 0.9 * self.smoothed_round_trip_time + 0.1 * rtt_f
+		target_rto = int(round(self.smoothed_round_trip_time + 4.0 * self.smoothed_variance))
+		print(f"target RTO={target_rto}")
+		self.retransmit_timeout = self._clamp_rto(target_rto)
+		print(f"Updating timeout with RTT={rtt} ms to RTO={self.retransmit_timeout} ms (previous RTO={old} ms)")
+
+	def _clamp_rto(self, value: int) -> int:
+		return max(self.min_rto, min(self.max_rto, int(value)))
+
+	def _network_time(self) -> int:
+		return int(self.network.sim.time)
+
 	def is_complete(self) -> bool:
 		return self.data_index >= len(self.data) and len(self.window) == 0
+
+	def snapshot(self) -> List:
+		return [self.retransmit_timeout, int(self.smoothed_round_trip_time), int(self.smoothed_variance)]

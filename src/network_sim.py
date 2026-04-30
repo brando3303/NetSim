@@ -109,7 +109,8 @@ class NetworkSim:
     for channel in self.network.channels:
       channel_data.append(channel.snapshot())
     self._process_analytics(node_data, channel_data)
-    self.schedule_after(self.snapshot_interval, self._collect_snapshot)
+    if len(self.eventQueue) > 0:
+      self.schedule_after(self.snapshot_interval, self._collect_snapshot)
 
   
   def _process_analytics(self, node_data: List, channel_data: List):
