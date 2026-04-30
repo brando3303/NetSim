@@ -90,7 +90,7 @@ def main():
         delay_variance=0,
         error_rate=0,
         max_queue_length=100,
-        propagation_delay_fn=lambda x: np.sin(x*2*np.pi*(1/1000))*30+ 40,
+        propagation_delay_fn=lambda x: np.sin(x*2*np.pi*(1/1000))*20+ 30,
     )
     network.add_channel(channel)
     channel.add_node(server)

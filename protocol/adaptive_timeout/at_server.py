@@ -65,6 +65,10 @@ class ATServer(Node):
 		self.smoothed_round_trip_time = float(100)
 		self.smoothed_variance = float(10)
 
+		self.rto_timer_running = False
+		self.fr_num_acks = 0
+		self.fr_last_seen_seq = None
+
 	def init(self):
 		return None
 
@@ -78,6 +82,10 @@ class ATServer(Node):
 			self.send_frame(next_seq, next_chunk)
 			self.last_frame_sent = next_seq
 
+		self.set_timer(self.retransmit_timeout, self.retransmit_timer)
+
+		
+
 	def receive(self, packet: Packet):
 		if packet.src != self.receiver:
 			return
@@ -90,12 +98,20 @@ class ATServer(Node):
 		self.handle_ack_packet(ack_seq, sack_blocks)
 
 	def handle_ack_packet(self, ack_seq: int, sack_blocks: list[SackBlock]):
+		# increase fast retransmit counter even if ACK is correct
 		if not self.is_in_window(ack_seq):
 			return
+
 
 		self.process_ack(ack_seq)
 		for sack_block in sack_blocks:
 			self.process_sack_block(sack_block)
+
+		if self.fr_last_seen_seq == ack_seq:
+			self.fr_num_acks += 1
+		else:
+			self.fr_num_acks = 1
+			self.fr_last_seen_seq = ack_seq
 
 		self.update_window()
 
@@ -128,6 +144,8 @@ class ATServer(Node):
 			if entry is None or not entry.acked:
 				break
 
+			self.fr_num_acks = 0
+			
 			self.last_ack_received = next_seq
 			del self.window[next_seq]
 
@@ -156,7 +174,6 @@ class ATServer(Node):
 			dst=self.receiver,
 		)
 		self.channels[0].send(packet)
-		self.set_timer(self.retransmit_timeout, self.retransmit_timer, seq_num)
 
 		if seq_num not in self.window:
 			self.window[seq_num] = _WindowEntry(
@@ -166,19 +183,20 @@ class ATServer(Node):
 				retransmitted=False,
 			)
 
-	def retransmit_timer(self, seq_num: int):
-		if not self.is_in_window(seq_num):
+	def retransmit_timer(self):
+		earliest_seq = (self.last_ack_received + 1) % self.seq_space
+		if not self.is_in_window(earliest_seq):
 			return
 
-		entry = self.window.get(seq_num)
+		entry = self.window.get(earliest_seq)
 		if entry is None or entry.acked:
 			return
 
 		self.channels[0].send(entry.packet)
 		entry.retransmitted = True
-		print(f"RETRANS seq {seq_num} at time {self._network_time()} with RTO {self.retransmit_timeout}")
+		print(f"RETRANS seq {earliest_seq} at time {self._network_time()} with RTO {self.retransmit_timeout}")
 		self.retransmit_timeout = min(self.max_rto, max(self.min_rto, 2 * self.retransmit_timeout))
-		self.set_timer(self.retransmit_timeout, self.retransmit_timer, seq_num)
+		self.set_timer(self.retransmit_timeout, self.retransmit_timer)
 
 	def is_in_window(self, seq_num: int) -> bool:
 		return 0 < self.seq_dist(self.last_ack_received, seq_num) <= self.window_size
