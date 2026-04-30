@@ -66,6 +66,7 @@ def plot_rto_adaptation(
 
     # Plot 1: Retransmit Timeout over time
     ax1.plot(x, rto_values, marker="o", linewidth=2, color="tab:red", label="RTO")
+    ax1.plot(x, 4*(np.sin(np.array(x)*2*np.pi*(1/1000))*50 + 60), linestyle="--", color="tab:gray", label="Simulated Propagation Delay")
     ax1.set_title("Adaptive Retransmit Timeout Over Time")
     ax1.set_xlabel(f"Simulation time (ms), window={window_ms}ms")
     ax1.set_ylabel("RTO (ms)")

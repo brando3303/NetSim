@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import numpy as np
 import sys
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -29,10 +30,34 @@ def main():
         b"This should be reconstructed exactly at the client."
         b"0000000000000000000000000000000000000000000000000000"
         b"0000000000000000000000000000000000000000000000000000"
+                b"Adaptive-timeout SACK demo payload. "
+        b"This should be reconstructed exactly at the client."
+        b"0000000000000000000000000000000000000000000000000000"
+        b"0000000000000000000000000000000000000000000000000000"
+                b"Adaptive-timeout SACK demo payload. "
+        b"This should be reconstructed exactly at the client."
+        b"0000000000000000000000000000000000000000000000000000"
+        b"0000000000000000000000000000000000000000000000000000"
+                b"Adaptive-timeout SACK demo payload. "
+        b"This should be reconstructed exactly at the client."
+        b"0000000000000000000000000000000000000000000000000000"
+        b"0000000000000000000000000000000000000000000000000000"
+                b"Adaptive-timeout SACK demo payload. "
+        b"This should be reconstructed exactly at the client."
+        b"0000000000000000000000000000000000000000000000000000"
+        b"0000000000000000000000000000000000000000000000000000"
+                b"Adaptive-timeout SACK demo payload. "
+        b"This should be reconstructed exactly at the client."
+        b"0000000000000000000000000000000000000000000000000000"
+        b"0000000000000000000000000000000000000000000000000000"
+                b"Adaptive-timeout SACK demo payload. "
+        b"This should be reconstructed exactly at the client."
+        b"0000000000000000000000000000000000000000000000000000"
+        b"0000000000000000000000000000000000000000000000000000"
     )
 
     seq_space = 1001
-    snapshot_interval = 20
+    snapshot_interval = 10
 
     sim = NetworkSim(seed=9, logging=False, track_analytics=True, snapshot_interval=snapshot_interval)
     network = Network(sim)
@@ -46,7 +71,7 @@ def main():
         retransmit_timeout=1000,
         seq_space=seq_space,
         min_rto=10,
-        max_rto=10000,
+        max_rto=500,
     )
     client = ATClient(
         name=2,
@@ -64,7 +89,8 @@ def main():
         propagation_delay=5,
         delay_variance=0,
         error_rate=0,
-        max_queue_length=100
+        max_queue_length=100,
+        propagation_delay_fn=lambda x: np.sin(x*2*np.pi*(1/1000))*30+ 40,
     )
     network.add_channel(channel)
     channel.add_node(server)
