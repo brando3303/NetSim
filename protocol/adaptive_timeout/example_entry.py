@@ -21,12 +21,20 @@ def main():
         b"This should be reconstructed exactly at the client."
         b"0000000000000000000000000000000000000000000000000000"
         b"0000000000000000000000000000000000000000000000000000"
+                b"Adaptive-timeout SACK demo payload. "
+        b"This should be reconstructed exactly at the client."
+        b"0000000000000000000000000000000000000000000000000000"
+        b"0000000000000000000000000000000000000000000000000000"
+                b"Adaptive-timeout SACK demo payload. "
+        b"This should be reconstructed exactly at the client."
+        b"0000000000000000000000000000000000000000000000000000"
+        b"0000000000000000000000000000000000000000000000000000"
     )
 
     seq_space = 1001
-    snapshot_interval = 50
+    snapshot_interval = 20
 
-    sim = NetworkSim(seed=7, logging=False, track_analytics=True, snapshot_interval=snapshot_interval)
+    sim = NetworkSim(seed=9, logging=False, track_analytics=True, snapshot_interval=snapshot_interval)
     network = Network(sim)
 
     server = ATServer(
@@ -37,7 +45,7 @@ def main():
         frame_size=4,
         retransmit_timeout=1000,
         seq_space=seq_space,
-        min_rto=100,
+        min_rto=10,
         max_rto=10000,
     )
     client = ATClient(
@@ -55,7 +63,8 @@ def main():
         bit_rate=1000 * 8 * 100,
         propagation_delay=5,
         delay_variance=0,
-        error_rate=30,
+        error_rate=0,
+        max_queue_length=100
     )
     network.add_channel(channel)
     channel.add_node(server)
