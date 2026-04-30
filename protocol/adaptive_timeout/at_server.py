@@ -62,8 +62,8 @@ class ATServer(Node):
 		self.min_rto = min_rto
 		self.max_rto = max_rto
 		self.retransmit_timeout = self._clamp_rto(retransmit_timeout)
-		self.smoothed_round_trip_time = float(100)
-		self.smoothed_variance = float(10)
+		self.smoothed_round_trip_time = -1
+		self.smoothed_variance = -1
 
 		self.rto_timer_running = False
 		self.fr_num_acks = 0
@@ -82,7 +82,9 @@ class ATServer(Node):
 			self.send_frame(next_seq, next_chunk)
 			self.last_frame_sent = next_seq
 
-		self.set_timer(self.retransmit_timeout, self.retransmit_timer)
+		if not self.rto_timer_running:
+			self.set_timer(self.retransmit_timeout, self.retransmit_timer)
+			self.rto_timer_running = True
 
 		
 
@@ -109,6 +111,12 @@ class ATServer(Node):
 
 		if self.fr_last_seen_seq == ack_seq:
 			self.fr_num_acks += 1
+			if self.fr_num_acks == 3:
+				print(f"FAST RETRANSMIT triggered for seq {ack_seq} at time {self._network_time()}")
+				entry = self.window.get(ack_seq)
+				if entry is not None and not entry.acked:
+					self.channels[0].send(entry.packet)
+					entry.retransmitted = True
 		else:
 			self.fr_num_acks = 1
 			self.fr_last_seen_seq = ack_seq
@@ -243,6 +251,11 @@ class ATServer(Node):
 			in_unacked_block = next_entry is not None and not next_entry.acked
 
 	def update_timeout(self, rtt: int):
+
+		if self.smoothed_round_trip_time < 0:
+			self.smoothed_round_trip_time = float(rtt)
+			self.smoothed_variance = float(rtt) / 2
+			return
    
 		rtt_f = float(rtt)
 		old = self.retransmit_timeout

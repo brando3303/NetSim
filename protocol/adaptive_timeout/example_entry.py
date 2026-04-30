@@ -71,7 +71,7 @@ def main():
         retransmit_timeout=1000,
         seq_space=seq_space,
         min_rto=10,
-        max_rto=500,
+        max_rto=60000,
     )
     client = ATClient(
         name=2,
@@ -90,7 +90,7 @@ def main():
         delay_variance=0,
         error_rate=0,
         max_queue_length=100,
-        propagation_delay_fn=lambda x: np.sin(x*2*np.pi*(1/1000))*20+ 30,
+        propagation_delay_fn=lambda x: np.sin(x*2*np.pi*(1/1000))*70+ 80,
     )
     network.add_channel(channel)
     channel.add_node(server)
