@@ -79,6 +79,7 @@ class TCPServer(Node):
 
 		# Congestion Window / AIMD
 		self.congestion_window = 1
+		self.ai_count = 0
 
 		# Slow Start
 		self.in_slow_start = True
@@ -162,20 +163,10 @@ class TCPServer(Node):
 				if self.in_slow_start:
 					self.in_slow_start = False
 
-
 		# --- Ack the cumulative range and this packet ---
 		print(f"[TCPServer] ACKed block from {(self.last_ack_received + 1) % self.seq_space} to {ack_seq}")
 		self.ack_block((self.last_ack_received + 1) % self.seq_space, ack_seq)
 		
-    # Only continue processing if the ack refers to a packet in our window
-		entry = self.window.get(ack_seq)
-		if entry is None or entry.acked:
-			return
-
-
-		entry.acked = True
-
-  
 		# --- Congestion window update ---
 		if self.in_slow_start:
 			self.congestion_window = min(self.congestion_window + 1, self.window_size)
@@ -183,7 +174,18 @@ class TCPServer(Node):
 				self.in_slow_start = False
 		else:
 			# AIMD additive increase
-			self.congestion_window = min(self.congestion_window + 1, self.window_size)
+			self.ai_count += 1
+			if self.ai_count >= self.congestion_window:
+				self.congestion_window = min(self.congestion_window + 1, self.window_size)
+				self.ai_count = 0
+
+    # Only continue processing if the ack refers to a packet in our window
+		entry = self.window.get(ack_seq)
+		if entry is None or entry.acked:
+			return
+
+
+		entry.acked = True
 
 		# --- Adaptive timeout update ---
 		# Only update with clean (non-retransmitted) RTT samples

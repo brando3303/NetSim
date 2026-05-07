@@ -21,14 +21,14 @@ def main():
 		b"This should be reconstructed exactly at the client. "
 		b"0000000000000000000000000000000000000000000000000000"
 		b"0000000000000000000000000000000000000000000000000000"
-	) * 10
+	) * 100
 
-	seq_space = 512
-	window_size = 16
+	seq_space = 1024
+	window_size = 300
 	snapshot_interval = 50
 
 	sim = NetworkSim(
-		seed=42,
+		seed=44,
 		logging=False,
 		track_analytics=False,
 		snapshot_interval=snapshot_interval,
@@ -60,10 +60,10 @@ def main():
 	# Channel with moderate loss and variable delay to exercise congestion control
 	channel = Channel(
 		bit_rate=1000 * 8 * 100,
-		propagation_delay=10,
-		delay_variance=0,
+		propagation_delay=5,
+		delay_variance=4,
 		error_rate=0,
-		max_queue_length=200,
+		max_queue_length=30,
 	)
 	network.add_channel(channel)
 	channel.add_node(server)
