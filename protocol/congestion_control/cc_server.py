@@ -124,13 +124,13 @@ class TCPServer(Node):
 			return
 
 		ack_seq, sack_blocks = decoded
-		print(
-			f"[TCPServer] ACK seq={ack_seq} sack={sack_blocks} "
-			f"cwnd={self.congestion_window} ss={self.in_slow_start} "
-			f"cThresh={self.congestion_threshold} "
-			f"window={list([key, p.acked] for key, p in self.window.items())}) "
-			f"LAR={self.last_ack_received}"
-		)
+		# print(
+		# 	f"[TCPServer] ACK seq={ack_seq} sack={sack_blocks} "
+		# 	f"cwnd={self.congestion_window} ss={self.in_slow_start} "
+		# 	f"cThresh={self.congestion_threshold} "
+		# 	f"window={list([key, p.acked] for key, p in self.window.items())}) "
+		# 	f"LAR={self.last_ack_received}"
+		# )
 		self.handle_ack_packet(ack_seq, sack_blocks)
 
 	def handle_ack_packet(self, ack_seq: int, sack_blocks: list[SackBlock]):
@@ -157,14 +157,14 @@ class TCPServer(Node):
 				if fr_entry is not None and not fr_entry.acked:
 					self.channels[0].send(fr_entry.packet)
 					fr_entry.retransmitted = True
-					print(f"[TCPServer] FAST RETRANSMIT seq={retransmit_seq}")
+					# print(f"[TCPServer] FAST RETRANSMIT seq={retransmit_seq}")
 				self.repeat_ack_count = 0
 				self.md_window()
 				if self.in_slow_start:
 					self.in_slow_start = False
 
 		# --- Ack the cumulative range and this packet ---
-		print(f"[TCPServer] ACKed block from {(self.last_ack_received + 1) % self.seq_space} to {ack_seq}")
+		# print(f"[TCPServer] ACKed block from {(self.last_ack_received + 1) % self.seq_space} to {ack_seq}")
 		self.ack_block((self.last_ack_received + 1) % self.seq_space, ack_seq)
 		
 		# --- Congestion window update ---
@@ -209,7 +209,7 @@ class TCPServer(Node):
 			entry = self.window.get(next_seq)
 			if entry is None or not entry.acked:
 				break
-			print(f"[TCPServer] Window slide: last_ack_received={self.last_ack_received} -> {next_seq}")
+			# print(f"[TCPServer] Window slide: last_ack_received={self.last_ack_received} -> {next_seq}")
 			self.last_ack_received = next_seq
 			del self.window[next_seq]
 			moved = True
@@ -227,7 +227,7 @@ class TCPServer(Node):
 		# if moved and self.window:
 		# 	new_earliest = (self.last_ack_received + 1) % self.seq_space
 		# 	self.set_timer(self.retransmit_timeout, self.retransmit_timer, new_earliest)
-		print(f"[TCPServer] window slid to last_ack_received={self.last_ack_received}")
+		# print(f"[TCPServer] window slid to last_ack_received={self.last_ack_received}")
 
 	def next_data(self) -> bytes:
 		remaining = len(self.data) - self.data_index
@@ -265,6 +265,7 @@ class TCPServer(Node):
 		# Guard against stale timers: only act if seq_num is still the earliest
 		if self.data_index >= len(self.data) and len(self.window) == 0:
 			# All data sent and acked: no need to keep timers running
+			print(f"[TCPServer] All data sent and acked; stopping retransmit timers time={self._network_time()}")
 			return
 
 		earliest = (self.last_ack_received + 1) % self.seq_space
@@ -277,10 +278,10 @@ class TCPServer(Node):
 		# Retransmit the earliest unacked packet
 		self.channels[0].send(entry.packet)
 		entry.retransmitted = True
-		print(
-			f"[TCPServer] TIMEOUT seq={seq_num} "
-			f"rto={self.retransmit_timeout} cwnd={self.congestion_window}"
-		)
+		# print(
+		# 	f"[TCPServer] TIMEOUT seq={seq_num} "
+		# 	f"rto={self.retransmit_timeout} cwnd={self.congestion_window}"
+		# )
 
 		# Exponential backoff and reschedule
 		self.retransmit_timeout = self._clamp_rto(2 * self.retransmit_timeout)

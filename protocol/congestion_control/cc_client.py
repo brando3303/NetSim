@@ -58,10 +58,10 @@ class TCPClient(Node):
 		self.handle_sw_packet(seq_num, payload)
 
 	def handle_sw_packet(self, seq_num: int, payload: bytes):
-		print(
-			f"[TCPClient] seq={seq_num} payload_len={len(payload)} "
-			f"LAS={self.last_ack_sent}"
-		)
+		# print(
+		# 	f"[TCPClient] seq={seq_num} payload_len={len(payload)} "
+		# 	f"LAS={self.last_ack_sent}"
+		# )
 		if not self.is_in_window(seq_num):
 			# Out-of-window: resend last cumulative ACK so server knows we're alive
 			self.send_sack(self.last_ack_sent, [])
