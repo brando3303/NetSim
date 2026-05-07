@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 
+import numpy as np
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
 	sys.path.insert(0, str(PROJECT_ROOT))
@@ -14,8 +16,19 @@ from src.network_sim import NetworkSim
 from protocol.congestion_control.cc_client import TCPClient
 from protocol.congestion_control.cc_server import TCPServer
 
+# Propagation delay oscillates between ~10 ms and ~30 ms with a period of 4 s.
+# Keeping delays short so cwnd can grow and the congestion-control dynamics
+# are visible without the simulation taking excessively long.
+PERIOD_MS = 4_000
+BASE_DELAY_MS = 20
+AMPLITUDE_MS = 10
 
-def main():
+
+def propagation_delay_fn(t: float) -> float:
+	return BASE_DELAY_MS + AMPLITUDE_MS * np.sin(t * 2 * np.pi / PERIOD_MS)
+
+
+def main() -> tuple[NetworkSim, int]:
 	payload = (
 		b"Congestion-control demo payload. "
 		b"This should be reconstructed exactly at the client. "
@@ -30,7 +43,7 @@ def main():
 	sim = NetworkSim(
 		seed=44,
 		logging=False,
-		track_analytics=False,
+		track_analytics=True,
 		snapshot_interval=snapshot_interval,
 	)
 	network = Network(sim)
@@ -44,7 +57,7 @@ def main():
 		retransmit_timeout=500,
 		seq_space=seq_space,
 		min_rto=20,
-		max_rto=10_000,
+		max_rto=10000,
 	)
 	client = TCPClient(
 		name=2,
@@ -57,13 +70,13 @@ def main():
 	network.add_node(server)
 	network.add_node(client)
 
-	# Channel with moderate loss and variable delay to exercise congestion control
 	channel = Channel(
 		bit_rate=1000 * 8 * 100,
-		propagation_delay=5,
-		delay_variance=4,
+		propagation_delay=BASE_DELAY_MS,
+		delay_variance=2,
 		error_rate=0,
 		max_queue_length=30,
+		propagation_delay_fn=propagation_delay_fn,
 	)
 	network.add_channel(channel)
 	channel.add_node(server)
@@ -79,6 +92,8 @@ def main():
 	print(f"Final cwnd       : {server.congestion_window}")
 	print(f"Final cThresh    : {server.congestion_threshold}")
 	print(f"Final RTO        : {server.retransmit_timeout} ms")
+
+	return sim, snapshot_interval
 
 
 if __name__ == "__main__":

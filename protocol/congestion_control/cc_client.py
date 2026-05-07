@@ -116,3 +116,8 @@ class TCPClient(Node):
 			blocks.append(SackBlock(sle=sle, sre=i))
 
 		return blocks
+
+	def snapshot(self) -> list[int]:
+		# Return zeros matching the 6-field server snapshot so analytics
+		# sum_analytics_matrix doesn't raise on mismatched row widths.
+		return [0, 0, 0, 0, 0, 0]
