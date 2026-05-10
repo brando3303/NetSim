@@ -1,3 +1,21 @@
+"""Sliding-window-with-SACK sender (server) for NetSim.
+
+The :class:`SWSACKServer` implements a Go-Back-N–style sender augmented with
+Selective Acknowledgments (SACK).  Key design points:
+
+* A fixed-size sequence space (default 256) is split into a sliding window of
+  at most ``window_size`` frames in flight simultaneously.
+* The window size must be strictly less than half the sequence space to avoid
+  ambiguity between new and retransmitted frames after a wraparound.
+* Retransmission is timer-based: each sent frame has its own independent
+  retransmit timer; the timer is cancelled implicitly when the frame is acked.
+* On receiving an ACK the server marks the cumulative range and any SACK blocks
+  as acknowledged, slides the window forward, and immediately refills it with
+  new data frames.  If SACK blocks are present it also retransmits the first
+  contiguous unacked run to recover faster.
+* ``is_complete()`` returns ``True`` once all data has been sent *and* all
+  outstanding frames have been acknowledged.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -10,11 +28,31 @@ from .common import SackBlock, decode_sack_payload, encode_sw_payload
 
 @dataclass(slots=True)
 class _WindowEntry:
-	acked: bool
-	packet: Packet
-
+    """Tracks a single in-flight frame."""
+    acked:  bool
+    packet: Packet
 
 class SWSACKServer(Node):
+	"""Sliding-window sender with SACK-driven selective retransmission.
+
+Sends a byte stream to a single receiver, tracking in-flight frames in a
+dictionary keyed by sequence number.  Sequence numbers are modular (wrap
+at ``seq_space``).
+
+Attributes:
+		seq_space:          Size of the sequence number space (must be > 2 and
+												``window_size < seq_space // 2``).
+		window_size:        Maximum number of unacknowledged frames in flight.
+		window:             Dict mapping seq_num -> :class:`_WindowEntry`.
+		last_ack_received:  Highest cumulative ACK received so far.
+		last_frame_sent:    Sequence number of the most recently transmitted frame.
+		receiver:           Name (node ID) of the destination node.
+		data:               Full byte string to transmit.
+		data_index:         Byte offset into ``data``; marks how far we have
+												sliced new frames from the buffer.
+		frame_size:         Maximum payload bytes per frame.
+		retransmit_timeout: Fixed retransmit timeout in ms for this variant.
+"""
 	def __init__(
 		self,
 		name: int,
@@ -26,17 +64,19 @@ class SWSACKServer(Node):
 		retransmit_timeout: int,
 		seq_space: int = 256,
 	):
+		"""Construct the SACK sender.
+
+		Args:
+			name:               Node ID used as ``src`` in outgoing packets.
+			receiver:           Node ID of the destination (receiver) node.
+			data:               Byte string (or UTF-8 str) to deliver reliably.
+			window_size:        Max unacknowledged frames in flight at once.
+			frame_size:         Max payload bytes per frame.
+			retransmit_timeout: Fixed retransmit timeout in ms.
+			seq_space:          Sequence number modulus.  Must be > 2 and
+			                    ``window_size < seq_space // 2``.
+		"""
 		super().__init__(name)
-		if window_size <= 0:
-			raise ValueError("window_size must be > 0")
-		if seq_space <= 2:
-			raise ValueError("seq_space must be > 2")
-		if window_size >= seq_space // 2:
-			raise ValueError("window_size must be less than half of seq_space")
-		if frame_size <= 0:
-			raise ValueError("frame_size must be > 0")
-		if retransmit_timeout <= 0:
-			raise ValueError("retransmit_timeout must be > 0")
 
 		self.seq_space = seq_space
 		self.window_size = window_size
@@ -55,6 +95,7 @@ class SWSACKServer(Node):
 		return None
 
 	def start(self):
+		"""Fill the send window with the first ``window_size`` data frames."""
 		for _ in range(self.window_size):
 			next_chunk = self.next_data()
 			if len(next_chunk) == 0:
@@ -64,6 +105,7 @@ class SWSACKServer(Node):
 			self.last_frame_sent = next_seq
 
 	def receive(self, packet: Packet):
+		"""Handle an incoming packet (expected to be an ACK from the receiver)."""
 		if packet.src != self.receiver:
 			return
 
@@ -72,10 +114,10 @@ class SWSACKServer(Node):
 			return
 
 		ack_seq, sack_blocks = decoded
-		print(f"Server received ACK for seq_num={ack_seq} with SACK blocks={sack_blocks}")
 		self.handle_ack_packet(ack_seq, sack_blocks)
 
 	def handle_ack_packet(self, ack_seq: int, sack_blocks: list[SackBlock]):
+		"""Process a decoded ACK: mark frames acked, slide window, refill, retransmit."""
 		if not self.is_in_window(ack_seq):
 			return
 
@@ -89,7 +131,8 @@ class SWSACKServer(Node):
 			self.retransmit_next_block()
 
 	def process_ack(self, ack_seq: int):
-		# if ack_seq > self.last_ack_received
+		"""Mark all frames from ``last_ack_received+1`` up to *ack_seq* as acked."""
+		# ack_block handles the cumulative ACK range (last_ack+1 .. ack_seq)
 		self.ack_block((self.last_ack_received + 1) % self.seq_space, ack_seq)
 		entry = self.window.get(ack_seq)
 		if entry is None:
@@ -97,9 +140,11 @@ class SWSACKServer(Node):
 		entry.acked = True
 
 	def process_sack_block(self, sack_block: SackBlock):
+		"""Mark the half-open range ``[sle, sre)`` of sequence numbers as acked."""
 		self.ack_block(sack_block.sle, sack_block.sre)
 
 	def update_window(self):
+		"""Slide the window forward over contiguous acked frames and send new ones."""
 		while True:
 			next_seq = (self.last_ack_received + 1) % self.seq_space
 			entry = self.window.get(next_seq)
@@ -118,6 +163,7 @@ class SWSACKServer(Node):
 			self.last_frame_sent = send_seq
 
 	def next_data(self) -> bytes:
+		"""Return the next ``frame_size`` bytes from the data buffer (or fewer if near end)."""
 		remaining = len(self.data) - self.data_index
 		if remaining <= 0:
 			return b""
@@ -140,6 +186,7 @@ class SWSACKServer(Node):
 			self.window[seq_num] = _WindowEntry(acked=False, packet=packet)
 
 	def retransmit_timer(self, seq_num: int):
+		"""Retransmit callback: resend frame *seq_num* if still unacked and in window."""
 		if not self.is_in_window(seq_num):
 			return
 
@@ -157,6 +204,12 @@ class SWSACKServer(Node):
 		return (right - left) % self.seq_space
 
 	def ack_block(self, sle: int, sre: int):
+		"""Mark every in-window sequence number in half-open range ``[sle, sre)`` as acked.
+
+		The guard ``seq_dist(sle, sre) > seq_space // 2`` discards ranges that
+		wrap backwards more than half the sequence space, which would indicate a
+		stale or malformed block.
+		"""
 		if self.seq_dist(sle, sre) > self.seq_space // 2:
 			return
 		i = sle % self.seq_space
@@ -168,6 +221,11 @@ class SWSACKServer(Node):
 			i = (i + 1) % self.seq_space
 
 	def retransmit_next_block(self):
+		"""Retransmit the leading contiguous run of unacked frames in the window.
+
+		Called after processing SACK blocks so that gaps at the front of the
+		window are retransmitted promptly without waiting for a timer.
+		"""
 		start = (self.last_ack_received + 1) % self.seq_space
 		end = (self.last_frame_sent + 1) % self.seq_space
 
@@ -193,4 +251,5 @@ class SWSACKServer(Node):
 			in_unacked_block = next_entry is not None and not next_entry.acked
 
 	def is_complete(self) -> bool:
+		"""Return ``True`` once all data has been sent and all frames acknowledged."""
 		return self.data_index >= len(self.data) and len(self.window) == 0

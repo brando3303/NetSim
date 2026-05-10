@@ -1,3 +1,10 @@
+"""Adaptive-timeout SACK wire-format codec.
+
+Identical wire format to :mod:`protocol.sliding_window_sack.common`.
+See that module for full documentation of the frame layout and SACK block
+semantics.  This copy exists so that the adaptive-timeout protocol package
+has no cross-package import dependency on the sliding-window package.
+"""
 from __future__ import annotations
 
 import struct
@@ -5,20 +12,22 @@ from dataclasses import dataclass
 
 _MAGIC = b"SWSK"
 _DATA_TYPE = 1
-_ACK_TYPE = 2
+_ACK_TYPE  = 2
 
-_HEADER_STRUCT = struct.Struct("!4sBI")
+_HEADER_STRUCT     = struct.Struct("!4sBI")
 _ACK_HEADER_STRUCT = struct.Struct("!B")
-_BLOCK_STRUCT = struct.Struct("!II")
+_BLOCK_STRUCT      = struct.Struct("!II")
 
 
 @dataclass(frozen=True, slots=True)
 class SackBlock:
+    """A single Selective ACK block ``[sle, sre)`` (half-open interval)."""
     sle: int
     sre: int
 
 
 def _to_bytes(data: bytes | str) -> bytes:
+    """Coerce *data* to bytes, encoding str as UTF-8."""
     if isinstance(data, bytes):
         return data
     if isinstance(data, str):
@@ -27,10 +36,12 @@ def _to_bytes(data: bytes | str) -> bytes:
 
 
 def encode_sw_payload(seq_num: int, payload: bytes) -> bytes:
+    """Encode a DATA frame payload.  See :mod:`protocol.sliding_window_sack.common`."""
     return _HEADER_STRUCT.pack(_MAGIC, _DATA_TYPE, seq_num) + payload
 
 
 def decode_sw_payload(data: bytes | str) -> tuple[int, bytes] | None:
+    """Decode a DATA frame payload.  Returns ``(seq_num, payload)`` or ``None``."""
     payload = _to_bytes(data)
     if len(payload) < _HEADER_STRUCT.size:
         return None
@@ -43,6 +54,7 @@ def decode_sw_payload(data: bytes | str) -> tuple[int, bytes] | None:
 
 
 def encode_sack_payload(ack_seq_num: int, sack_blocks: list[SackBlock]) -> bytes:
+    """Encode an ACK frame payload (cumulative ACK + optional SACK blocks)."""
     block_count = min(255, len(sack_blocks))
     encoded = bytearray(_HEADER_STRUCT.pack(_MAGIC, _ACK_TYPE, ack_seq_num))
     encoded.extend(_ACK_HEADER_STRUCT.pack(block_count))
@@ -52,6 +64,7 @@ def encode_sack_payload(ack_seq_num: int, sack_blocks: list[SackBlock]) -> bytes
 
 
 def decode_sack_payload(data: bytes | str) -> tuple[int, list[SackBlock]] | None:
+    """Decode an ACK frame payload.  Returns ``(ack_seq_num, sack_blocks)`` or ``None``."""
     payload = _to_bytes(data)
     minimum_len = _HEADER_STRUCT.size + _ACK_HEADER_STRUCT.size
     if len(payload) < minimum_len:

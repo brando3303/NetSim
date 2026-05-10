@@ -1,38 +1,52 @@
 # NetSim
 
 NetSim is a discrete-event network simulator built to stress-test protocol behavior on unreliable links.
-It provides a compact, extensible framework for modeling packet transport under queue pressure, delay, and corruption.
+It provides a compact, extensible framework for modeling packet transport under queue pressure, delay,
+jitter, and byte-level corruption.
 
+## Features
 
-- Performance-oriented core with a heap-based event engine and focused profiling workflow
-- Clear systems design: modular simulation engine, network model, channel model, and packet layer
-- Reliability-focused packet handling with checksum validation and typed payload support
-- Built-in observability through snapshot-based throughput and drop analytics
-- Practical experiments included for bottleneck analysis and visualization
-- Solid verification baseline with 23 automated tests
+- **Heap-based event engine** with seeded RNG for deterministic, reproducible runs
+- **Rich channel model**: transmission time, propagation delay, jitter, queue overflow, byte-error injection
+- **Unicast and broadcast** delivery (`BROADCAST_ID = 0xFFFFFFFF` delivers to all nodes on the channel)
+- **CRC-32 packet integrity** with typed payloads (`bytes` or UTF-8 `str`)
+- **Snapshot-based analytics** for throughput and drop counters
+- **Three complete protocol implementations** with matching test suites
 
-## Technical Highlights
+## Protocols
 
-- Event-driven simulator with seeded RNG for reproducible runs
-- Channel-level modeling of:
-	- transmission time (bitrate-aware)
-	- propagation delay and optional variance
-	- queue overflow behavior
-	- byte-level error injection
-- Delivery semantics:
-	- unicast to destination node
-	- broadcast using `BROADCAST_ID = 0xFFFFFFFF`
-- Packet wire format:
-	- `src | dst | checksum | typed payload`
+| Protocol | File | Description |
+|---|---|---|
+| Sliding Window + SACK | `protocol/sliding_window_sack/` | Fixed-RTO sliding window with selective retransmit |
+| Adaptive Timeout | `protocol/adaptive_timeout/` | Jacobson/Karels SRTT/SVAR adaptive RTO + fast retransmit |
+| TCP-like Congestion Control | `protocol/congestion_control/` | AIMD slow-start + fast retransmit/recovery + adaptive RTO |
 
 ## Architecture
 
-- `src/network_sim.py`: event scheduling, run loop, analytics orchestration
-- `src/network.py`: network composition and simulation helper API
-- `src/node.py`: abstract node contract (`init`, `start`, `receive`, optional `snapshot`)
-- `src/channel.py`: queueing, transport behavior, delivery, and per-window channel counters
-- `src/packet.py`: packet dataclass plus encode/decode/validate helpers
-- `src/index.py`: single import surface for core public types
+```
+src/
+  network_sim.py  — discrete-event engine (heap queue, clock, seeded RNG, analytics)
+  network.py      — topology container; schedules events on behalf of nodes
+  node.py         — abstract base class: init / start / receive / snapshot
+  channel.py      — queueing, transmission delay, propagation delay, error injection
+  packet.py       — Packet dataclass; encode / decode / CRC-32 validate
+  index.py        — public import surface
+
+protocol/
+  sliding_window_sack/   — SWSACKServer + SWSACKClient
+  adaptive_timeout/      — ATServer + ATClient
+  congestion_control/    — TCPServer + TCPClient
+
+examples/
+  bottleneck.py          — 30-node queue-saturation experiment
+  bottleneck_plot.py     — histogram of throughput vs drops
+
+tests/
+  netsim/                — core simulator unit tests
+  sliding_window_sack/   — SW+SACK protocol tests
+  adaptive_timeout/      — adaptive RTO tests
+  congestion_control/    — TCP-like congestion control tests
+```
 
 ## Quick Start
 
@@ -43,25 +57,28 @@ python -m venv .venv
 python -m pip install -U pip
 python -m pip install matplotlib numpy pytest
 
-python .\main.py
-python -m pytest tests/test_suite.py -q
+# Minimal two-node demo
+python main.py
+
+# Run all tests
+python -m pytest -q
 ```
 
-## Example Usage
+## Basic Usage
 
 ```python
 from src.index import NetworkSim, Network, Channel, Node, Packet
 
 
 class MyNode(Node):
-		def init(self):
-				pass
+    def init(self) -> None:
+        pass
 
-		def start(self):
-				self.channels[0].send(Packet("hello", self.name, 2))
+    def start(self) -> None:
+        self.channels[0].send(Packet("hello", self.name, 2))
 
-		def receive(self, packet: Packet):
-				print(self.name, packet.src, packet.data)
+    def receive(self, packet: Packet) -> None:
+        print(self.name, packet.src, packet.data)
 
 
 sim = NetworkSim(seed=42, logging=False)
@@ -72,7 +89,7 @@ n2 = MyNode(2)
 net.add_node(n1)
 net.add_node(n2)
 
-ch = Channel(bit_rate=1000 * 8, propogation_delay=0, error_rate=0)
+ch = Channel(bit_rate=8_000, propagation_delay=10, error_rate=0)
 net.add_channel(ch)
 ch.add_node(n1)
 ch.add_node(n2)
@@ -80,19 +97,44 @@ ch.add_node(n2)
 sim.start()
 ```
 
-## Analytics and Experiments
+## Running Demos
 
-Enable analytics with `NetworkSim(track_analytics=True, snapshot_interval=...)`.
+```powershell
+# Sliding-window SACK
+python protocol/sliding_window_sack/example_entry.py
 
-- `Node.snapshot()` can be overridden for node-level metrics
-- `Channel.snapshot()` returns `[throughput_since_last_snapshot, drops_since_last_snapshot]`
-- `sim.node_analytics` stores per-snapshot, element-wise node metric aggregates
-- `sim.channel_analytics` stores per-snapshot, element-wise channel metric aggregates
+# Adaptive timeout (sinusoidal delay)
+python protocol/adaptive_timeout/example_entry.py
 
-Included examples:
+# TCP-like congestion control
+python protocol/congestion_control/example_entry.py
 
-- `examples/bottleneck.py`: queue-length sensitivity experiment across 30 nodes
-- `examples/bottleneck_plot.py`: time-window visualization of throughput vs drops
+# Bottleneck experiment with plot
+python examples/bottleneck_plot.py
+```
+
+## Analytics
+
+Enable with `NetworkSim(track_analytics=True, snapshot_interval=N)`:
+
+- Override `Node.snapshot()` to return per-node metrics each interval.
+- `Channel.snapshot()` returns `[throughput, drops]` since the last snapshot.
+- `sim.node_analytics` — per-interval element-wise sum of all node snapshots.
+- `sim.channel_analytics` — per-interval element-wise sum of all channel snapshots.
+
+## Deterministic Simulation
+
+All randomness (jitter, error injection, tie-breaking) flows through a single
+`random.Random` instance seeded at construction time.  The same seed always
+produces the same sequence of events, making experiments reproducible and
+diffs meaningful.
+
+## Limitations / Non-goals
+
+- Single-threaded; not intended for high-throughput performance benchmarks.
+- No IP routing or multi-hop forwarding — all nodes share a single broadcast channel.
+- Sequence numbers are modular integers, not byte-stream offsets.
+- No connection setup/teardown (SYN/FIN); simulations run until the event queue drains.
 
 ## Notes
 

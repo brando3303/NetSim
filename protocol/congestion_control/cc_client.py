@@ -1,3 +1,10 @@
+"""TCP-like congestion-control receiver (client) for NetSim.
+
+The :class:`TCPClient` is the receiver counterpart to :class:`TCPServer`.
+It performs no congestion control itself — it simply buffers out-of-order
+DATA frames and sends cumulative ACK + SACK feedback, which drives the
+sender's congestion and retransmit logic.
+"""
 from __future__ import annotations
 
 from src.node import Node
@@ -7,10 +14,12 @@ from .common import SackBlock, decode_sw_payload, encode_sack_payload
 
 
 class TCPClient(Node):
-	"""
-	Receiver-side counterpart to TCPServer.  Accepts in-order and out-of-order
-	frames, buffers out-of-order arrivals, and replies with cumulative ACKs plus
-	SACK blocks describing any buffered gaps.
+	"""Receiver-side counterpart to :class:`TCPServer`.
+
+	Accepts in-order and out-of-order frames, buffers out-of-order arrivals,
+	and replies with cumulative ACKs plus SACK blocks describing any buffered
+	gaps.  See :class:`~protocol.sliding_window_sack.swsack_client.SWSACKClient`
+	for full attribute documentation; this class is structurally identical.
 	"""
 
 	def __init__(
@@ -58,10 +67,10 @@ class TCPClient(Node):
 		self.handle_sw_packet(seq_num, payload)
 
 	def handle_sw_packet(self, seq_num: int, payload: bytes):
-		print(
-			f"[TCPClient] seq={seq_num} payload_len={len(payload)} "
-			f"LAS={self.last_ack_sent}"
-		)
+		# print(
+		# 	f"[TCPClient] seq={seq_num} payload_len={len(payload)} "
+		# 	f"LAS={self.last_ack_sent}"
+		# )
 		if not self.is_in_window(seq_num):
 			# Out-of-window: resend last cumulative ACK so server knows we're alive
 			self.send_sack(self.last_ack_sent, [])
@@ -116,3 +125,8 @@ class TCPClient(Node):
 			blocks.append(SackBlock(sle=sle, sre=i))
 
 		return blocks
+
+	def snapshot(self) -> list[int]:
+		# Return zeros matching the 6-field server snapshot so analytics
+		# sum_analytics_matrix doesn't raise on mismatched row widths.
+		return [0, 0, 0, 0, 0, 0]
