@@ -1,3 +1,29 @@
+"""Adaptive-timeout SACK sender (server) for NetSim.
+
+Extends the sliding-window SACK sender with two improvements:
+
+1. **Adaptive RTO** — The retransmit timeout is calculated using the
+   Jacobson/Karels algorithm (RFC 6298):
+   ``SRTT = 0.9*SRTT + 0.1*RTT``  (exponential weighted moving average)
+   ``SVAR = 0.9*SVAR + 0.1*|SRTT - RTT|``  (smoothed mean deviation)
+   ``RTO  = SRTT + 4*SVAR``  clamped to ``[min_rto, max_rto]``
+   Only un-retransmitted frames are used to sample RTT so that the Karn
+   ambiguity problem is avoided.
+
+2. **Fast retransmit** — If the same cumulative ACK sequence number is
+   received three times in a row the sender immediately retransmits the
+   oldest unacknowledged frame without waiting for the RTO timer.
+
+The global RTO timer fires at the current timeout interval and only
+retransmits the *earliest* unacknowledged frame (head-of-line).  After
+each timer-triggered retransmission the RTO is doubled (exponential
+back-off) until a clean ACK is received, at which point ``update_timeout``
+resets it back to the SRTT estimate.
+
+Here we have included a means to guess the retransmittion timeout so that a user wouldn't need to manually set
+it each time they wanted to use the protocol. We are still needing to set the window size and hope for the best, 
+but we'll see better ways to do this.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -11,13 +37,35 @@ from .common import SackBlock, decode_sack_payload, encode_sw_payload
 
 @dataclass(slots=True)
 class _WindowEntry:
-  acked: bool
-  packet: Packet
-  time_sent: int
-  retransmitted: bool
+    """Tracks a single in-flight frame with RTT-sampling metadata."""
+    acked:         bool
+    packet:        Packet
+    time_sent:     int   # simulator time (ms) when the frame was first sent
+    retransmitted: bool  # True if this frame has been retransmitted (skip RTT sample)
 
 
 class ATServer(Node):
+	"""Sliding-window sender with adaptive RTO and fast retransmit.
+
+	Attributes:
+		seq_space:                 Size of the sequence number space.
+		window_size:               Maximum unacknowledged frames in flight.
+		window:                    Dict mapping seq_num -> :class:`_WindowEntry`.
+		last_ack_received:         Highest cumulative ACK received so far.
+		last_frame_sent:           Sequence number of the last transmitted frame.
+		receiver:                  Destination node ID.
+		data:                      Full byte string to deliver.
+		data_index:                Byte offset into ``data`` (slicing cursor).
+		frame_size:                Max payload bytes per DATA frame.
+		min_rto:                   Lower bound on the computed RTO (ms).
+		max_rto:                   Upper bound on the computed RTO (ms).
+		retransmit_timeout:        Current RTO estimate (ms).
+		smoothed_round_trip_time:  SRTT estimate; -1 before first sample.
+		smoothed_variance:         SVAR estimate; -1 before first sample.
+		rto_timer_running:         Whether the global retransmit timer is active.
+		fr_num_acks:               Duplicate-ACK counter for fast retransmit.
+		fr_last_seen_seq:          Sequence number of the most recent ACK seen.
+	"""
 	def __init__(
 		self,
 		name: int,
@@ -73,6 +121,7 @@ class ATServer(Node):
 		return None
 
 	def start(self):
+		"""Fill the send window and start the global RTO timer."""
 		for _ in range(self.window_size):
 			next_chunk = self.next_data()
 			if len(next_chunk) == 0:
@@ -100,6 +149,12 @@ class ATServer(Node):
 		self.handle_ack_packet(ack_seq, sack_blocks)
 
 	def handle_ack_packet(self, ack_seq: int, sack_blocks: list[SackBlock]):
+		"""Process a decoded ACK with fast-retransmit detection.
+
+		If the same *ack_seq* is received three times without advancing the
+		cumulative ACK (duplicate ACKs), the oldest unacked frame is immediately
+		retransmitted (fast retransmit) without waiting for the RTO timer.
+		"""
 		# increase fast retransmit counter even if ACK is correct
 		if not self.is_in_window(ack_seq):
 			return
@@ -112,7 +167,6 @@ class ATServer(Node):
 		if self.fr_last_seen_seq == ack_seq:
 			self.fr_num_acks += 1
 			if self.fr_num_acks == 3:
-				print(f"FAST RETRANSMIT triggered for seq {ack_seq} at time {self._network_time()}")
 				entry = self.window.get(ack_seq)
 				if entry is not None and not entry.acked:
 					self.channels[0].send(entry.packet)
@@ -127,8 +181,8 @@ class ATServer(Node):
 			self.retransmit_next_block()
 
 	def process_ack(self, ack_seq: int):
+		"""Sample RTT from an un-retransmitted frame and mark the cumulative range acked."""
 		entry = self.window.get(ack_seq)
-		print(f"ACK entry={entry}")
 		if entry is None:
 			return
 
@@ -192,6 +246,12 @@ class ATServer(Node):
 			)
 
 	def retransmit_timer(self):
+		"""Global RTO timer callback: retransmit head-of-line and double the RTO.
+
+		Only the oldest unacknowledged frame (lowest sequence number in window)
+		is retransmitted on each timer firing.  The RTO is doubled (exponential
+		back-off) up to ``max_rto`` so that the sender backs off under congestion.
+		"""
 		earliest_seq = (self.last_ack_received + 1) % self.seq_space
 		if not self.is_in_window(earliest_seq):
 			return
@@ -202,7 +262,7 @@ class ATServer(Node):
 
 		self.channels[0].send(entry.packet)
 		entry.retransmitted = True
-		print(f"RETRANS seq {earliest_seq} at time {self._network_time()} with RTO {self.retransmit_timeout}")
+		# Exponential back-off: double RTO until max is reached.
 		self.retransmit_timeout = min(self.max_rto, max(self.min_rto, 2 * self.retransmit_timeout))
 		self.set_timer(self.retransmit_timeout, self.retransmit_timer)
 
@@ -251,29 +311,38 @@ class ATServer(Node):
 			in_unacked_block = next_entry is not None and not next_entry.acked
 
 	def update_timeout(self, rtt: int):
+		"""Update the adaptive RTO using the Jacobson/Karels EWMA algorithm.
 
+		On the first sample ``SRTT`` and ``SVAR`` are seeded directly.  On
+		subsequent samples both are updated with EWMA weights 0.9/0.1:
+		
+		    SRTT = 0.9 * SRTT + 0.1 * rtt
+		    SVAR = 0.9 * SVAR + 0.1 * |SRTT_prev - rtt|
+		    RTO  = round(SRTT + 4 * SVAR)  clamped to [min_rto, max_rto]
+		"""
 		if self.smoothed_round_trip_time < 0:
 			self.smoothed_round_trip_time = float(rtt)
 			self.smoothed_variance = float(rtt) / 2
 			return
    
 		rtt_f = float(rtt)
-		old = self.retransmit_timeout
 		self.smoothed_variance = 0.9 * self.smoothed_variance + 0.1 * abs(self.smoothed_round_trip_time - rtt_f)
 		self.smoothed_round_trip_time = 0.9 * self.smoothed_round_trip_time + 0.1 * rtt_f
 		target_rto = int(round(self.smoothed_round_trip_time + 4.0 * self.smoothed_variance))
-		print(f"target RTO={target_rto}")
 		self.retransmit_timeout = self._clamp_rto(target_rto)
-		print(f"Updating timeout with RTT={rtt} ms to RTO={self.retransmit_timeout} ms (previous RTO={old} ms)")
 
 	def _clamp_rto(self, value: int) -> int:
+		"""Clamp *value* to ``[min_rto, max_rto]``."""
 		return max(self.min_rto, min(self.max_rto, int(value)))
 
 	def _network_time(self) -> int:
+		"""Return the current simulator time in milliseconds."""
 		return int(self.network.sim.time)
 
 	def is_complete(self) -> bool:
+		"""Return ``True`` once all data has been sent and all frames acknowledged."""
 		return self.data_index >= len(self.data) and len(self.window) == 0
 
 	def snapshot(self) -> List:
+		"""Return ``[rto, srtt, svar]`` for periodic analytics plotting."""
 		return [self.retransmit_timeout, int(self.smoothed_round_trip_time), int(self.smoothed_variance)]

@@ -1,3 +1,9 @@
+"""Sliding-window-with-SACK receiver (client) for NetSim.
+
+The :class:`SWSACKClient` receives DATA frames from a :class:`SWSACKServer`,
+buffers out-of-order arrivals, delivers data to ``received_data`` in order,
+and sends cumulative ACK + SACK feedback on every received packet.
+"""
 from __future__ import annotations
 
 from src.node import Node
@@ -7,6 +13,17 @@ from .common import SackBlock, decode_sw_payload, encode_sack_payload
 
 
 class SWSACKClient(Node):
+	"""Sliding-window receiver with out-of-order buffering and SACK generation.
+
+	Attributes:
+		buffer_window_size: Maximum out-of-order sequence numbers to buffer.
+		server:             Node ID of the sender this client expects packets from.
+		buffer:             Dict mapping seq_num -> payload for buffered out-of-order frames.
+		last_ack_sent:      The highest contiguous sequence number delivered so far.
+		received_data:      Byte buffer of reassembled in-order application data.
+		seq_space:          Size of the sequence number space (same as the sender).
+		max_sack_blocks:    Maximum SACK blocks included in a single ACK packet.
+	"""
 	def __init__(
 		self,
 		name: int,
@@ -52,7 +69,12 @@ class SWSACKClient(Node):
 		self.handle_sw_packet(seq_num, payload)
 
 	def handle_sw_packet(self, seq_num: int, payload: bytes):
-		print(f"Client received packet with seq_num={seq_num}, payload={payload}, LAS={self.last_ack_sent}")
+		"""Process an incoming DATA frame.
+
+		Drops duplicates and out-of-window frames (sends a bare ACK to nudge the
+		sender).  Buffers in-window frames, advances the cumulative ACK, then
+		replies with the new cumulative ACK + current SACK blocks.
+		"""
 		if not self.is_in_window(seq_num):
 			self.send_sack(self.last_ack_sent, [])
 			return
@@ -75,17 +97,23 @@ class SWSACKClient(Node):
 		self.channels[0].send(ack_packet)
 
 	def update_window(self):
+		"""Deliver contiguous buffered frames to ``received_data`` and advance ``last_ack_sent``."""
 		while True:
 			next_seq = (self.last_ack_sent + 1) % self.seq_space
 			payload = self.buffer.get(next_seq)
 			if payload is None:
 				break
-			print(f"Client buffer  slid to LAS={next_seq}")
 			self.last_ack_sent = next_seq
 			self.received_data.extend(payload)
 			del self.buffer[next_seq]
 
 	def generate_sack_blocks(self) -> list[SackBlock]:
+		"""Build the list of SACK blocks describing out-of-order buffered frames.
+
+		Scans the receive window starting at ``last_ack_sent + 1`` and constructs
+		half-open ``[sle, sre)`` intervals for each contiguous run of buffered
+		sequence numbers.  At most ``max_sack_blocks`` blocks are returned.
+		"""
 		i = (self.last_ack_sent + 1) % self.seq_space
 		blocks: list[SackBlock] = []
 

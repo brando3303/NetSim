@@ -1,3 +1,9 @@
+"""Congestion-control SACK wire-format codec.
+
+Same wire format as :mod:`protocol.sliding_window_sack.common`.  This copy
+exists so the congestion-control package has no cross-package import
+dependency.
+"""
 from __future__ import annotations
 
 import struct
@@ -5,53 +11,61 @@ from dataclasses import dataclass
 
 _MAGIC = b"SWSK"
 _DATA_TYPE = 1
-_ACK_TYPE = 2
+_ACK_TYPE  = 2
 
-_HEADER_STRUCT = struct.Struct("!4sBI")
+_HEADER_STRUCT     = struct.Struct("!4sBI")
 _ACK_HEADER_STRUCT = struct.Struct("!B")
-_BLOCK_STRUCT = struct.Struct("!II")
+_BLOCK_STRUCT      = struct.Struct("!II")
 
 
 @dataclass(frozen=True, slots=True)
 class SackBlock:
-	sle: int
-	sre: int
+    """A single Selective ACK block ``[sle, sre)`` (half-open interval)."""
+    sle: int
+    sre: int
 
 
 def _to_bytes(data: bytes | str) -> bytes:
-	if isinstance(data, bytes):
-		return data
-	if isinstance(data, str):
-		return data.encode("utf-8")
-	raise TypeError("Packet payload must be bytes or str")
+    """Coerce *data* to bytes, encoding str as UTF-8."""
+    if isinstance(data, bytes):
+        return data
+    if isinstance(data, str):
+        return data.encode("utf-8")
+    raise TypeError("Packet payload must be bytes or str")
 
 
 def encode_sw_payload(seq_num: int, payload: bytes) -> bytes:
-	return _HEADER_STRUCT.pack(_MAGIC, _DATA_TYPE, seq_num) + payload
+    """Encode a DATA frame payload."""
+    return _HEADER_STRUCT.pack(_MAGIC, _DATA_TYPE, seq_num) + payload
 
 
 def decode_sw_payload(data: bytes | str) -> tuple[int, bytes] | None:
-	payload = _to_bytes(data)
-	if len(payload) < _HEADER_STRUCT.size:
-		return None
+    """Decode a DATA frame payload.  Returns ``(seq_num, payload)`` or ``None``."""
+    payload = _to_bytes(data)
+    if len(payload) < _HEADER_STRUCT.size:
+        return None
 
-	magic, packet_type, seq_num = _HEADER_STRUCT.unpack(payload[: _HEADER_STRUCT.size])
-	if magic != _MAGIC or packet_type != _DATA_TYPE:
-		return None
+    magic, packet_type, seq_num = _HEADER_STRUCT.unpack(payload[: _HEADER_STRUCT.size])
+    if magic != _MAGIC or packet_type != _DATA_TYPE:
+        return None
 
-	return seq_num, payload[_HEADER_STRUCT.size :]
+    return seq_num, payload[_HEADER_STRUCT.size :]
 
 
 def encode_sack_payload(ack_seq_num: int, sack_blocks: list[SackBlock]) -> bytes:
-	block_count = min(255, len(sack_blocks))
-	encoded = bytearray(_HEADER_STRUCT.pack(_MAGIC, _ACK_TYPE, ack_seq_num))
-	encoded.extend(_ACK_HEADER_STRUCT.pack(block_count))
-	for block in sack_blocks[:block_count]:
-		encoded.extend(_BLOCK_STRUCT.pack(block.sle, block.sre))
-	return bytes(encoded)
+    """Encode an ACK frame payload (cumulative ACK + optional SACK blocks)."""
+    block_count = min(255, len(sack_blocks))
+    encoded = bytearray(_HEADER_STRUCT.pack(_MAGIC, _ACK_TYPE, ack_seq_num))
+    encoded.extend(_ACK_HEADER_STRUCT.pack(block_count))
+    for block in sack_blocks[:block_count]:
+        encoded.extend(_BLOCK_STRUCT.pack(block.sle, block.sre))
+    return bytes(encoded)
+
+
 
 
 def decode_sack_payload(data: bytes | str) -> tuple[int, list[SackBlock]] | None:
+	"""Decode an ACK frame payload.  Returns ``(ack_seq_num, sack_blocks)`` or ``None``."""
 	payload = _to_bytes(data)
 	minimum_len = _HEADER_STRUCT.size + _ACK_HEADER_STRUCT.size
 	if len(payload) < minimum_len:

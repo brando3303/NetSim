@@ -1,3 +1,10 @@
+"""TCP-like congestion-control receiver (client) for NetSim.
+
+The :class:`TCPClient` is the receiver counterpart to :class:`TCPServer`.
+It performs no congestion control itself — it simply buffers out-of-order
+DATA frames and sends cumulative ACK + SACK feedback, which drives the
+sender's congestion and retransmit logic.
+"""
 from __future__ import annotations
 
 from src.node import Node
@@ -7,10 +14,12 @@ from .common import SackBlock, decode_sw_payload, encode_sack_payload
 
 
 class TCPClient(Node):
-	"""
-	Receiver-side counterpart to TCPServer.  Accepts in-order and out-of-order
-	frames, buffers out-of-order arrivals, and replies with cumulative ACKs plus
-	SACK blocks describing any buffered gaps.
+	"""Receiver-side counterpart to :class:`TCPServer`.
+
+	Accepts in-order and out-of-order frames, buffers out-of-order arrivals,
+	and replies with cumulative ACKs plus SACK blocks describing any buffered
+	gaps.  See :class:`~protocol.sliding_window_sack.swsack_client.SWSACKClient`
+	for full attribute documentation; this class is structurally identical.
 	"""
 
 	def __init__(

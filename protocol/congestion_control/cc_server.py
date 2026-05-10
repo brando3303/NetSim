@@ -1,3 +1,26 @@
+"""TCP-like congestion-controlled sender (server) for NetSim.
+
+The :class:`TCPServer` builds on top of the adaptive-timeout SACK sender and
+adds a full TCP-like congestion control loop:
+
+* **Slow start** — ``congestion_window`` starts at 1 and doubles each ACK
+  until it reaches ``congestion_threshold`` (or ``window_size``).
+* **AIMD additive increase** — After slow start, ``congestion_window``
+  increases by 1 for every full congestion-window worth of ACKs received.
+* **Multiplicative decrease** — On triple duplicate ACK *or* timeout,
+  ``congestion_threshold = max(1, cwnd // 2)`` and ``congestion_window``
+  returns to 1 (timeout) or is halved (fast retransmit).
+* **Fast retransmit** — Three consecutive duplicate ACKs trigger an
+  immediate retransmit of the head-of-line frame without waiting for RTO.
+* **Fast recovery** — After fast retransmit, slow start is exited (the
+  connection stays in AIMD mode at the reduced threshold).
+* **Adaptive RTO** — Same Jacobson/Karels SRTT/Svar algorithm as ATServer.
+
+The per-frame retransmit timer guards against stale timer fires: a timer
+firing for a sequence number that is no longer the earliest unacked frame
+(because intervening ACKs arrived) is silently discarded and re-armed for
+the actual current earliest frame unacked.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -11,19 +34,40 @@ from .common import SackBlock, decode_sack_payload, encode_sw_payload
 
 @dataclass(slots=True)
 class _WindowEntry:
-	acked: bool
-	packet: Packet
-	time_sent: int
-	retransmitted: bool
+    """Tracks a single in-flight frame with RTT-sampling metadata."""
+    acked:         bool
+    packet:        Packet
+    time_sent:     int   # simulator time (ms) when first sent
+    retransmitted: bool  # True = skip RTT sampling for this frame
 
 
 class TCPServer(Node):
-	"""
-	Congestion-controlled reliable server combining:
-	  - Sliding window with SACK
-	  - Adaptive timeout (SRTT/Svar-based RTO)
-	  - Fast retransmit / fast recovery (3 duplicate ACKs)
-	  - Congestion window (AIMD) with slow start
+	"""TCP-like congestion-controlled reliable sender.
+
+	Combines sliding-window SACK, adaptive RTO, fast retransmit/recovery,
+	and AIMD congestion control in a single node.  See the module docstring
+	for a description of each mechanism.
+
+	Attributes:
+		seq_space:             Sequence number modulus.
+		window_size:           Hard upper bound on frames in flight.
+		window:                Dict mapping seq_num -> :class:`_WindowEntry`.
+		last_ack_received:     Highest cumulative ACK received.
+		last_frame_sent:       Sequence number of the last transmitted frame.
+		receiver:              Destination node ID.
+		data:                  Full byte string to deliver.
+		data_index:            Byte offset (slicing cursor) into ``data``.
+		frame_size:            Max payload bytes per DATA frame.
+		min_rto / max_rto:     RTO clamp bounds (ms).
+		retransmit_timeout:    Current RTO estimate (ms).
+		smoothed_rtt:          SRTT estimate; -1 before first sample.
+		smoothed_variance:     SVAR estimate; -1 before first sample.
+		last_seq_acked:        Last ACK sequence number (for dup-ACK detection).
+		repeat_ack_count:      Consecutive duplicate-ACK counter.
+		congestion_window:     Current CWND (frames).
+		ai_count:              ACK counter for additive-increase logic.
+		in_slow_start:         Whether slow start is currently active.
+		congestion_threshold:  Threshold at which slow start exits to AIMD.
 	"""
 
 	def __init__(
@@ -258,14 +302,22 @@ class TCPServer(Node):
 	# ------------------------------------------------------------------
 
 	def retransmit_timer(self, seq_num: int):
-		"""
-		Fires for the earliest unacked packet.  Stale timers (for already-acked
-		or superseded sequence numbers) are discarded silently.
+		"""Per-sequence-number RTO timer callback.
+
+		Stale timer fires (i.e., where *seq_num* is no longer the earliest
+		unacknowledged frame) are detected and silently converted into a
+		reschedule for the actual head-of-line frame.  This prevents a burst
+		of retransmissions when multiple per-frame timers were armed.
+
+		On a genuine timeout:
+		- The frame is retransmitted.
+		- The RTO is doubled (exponential back-off).
+		- ``congestion_threshold`` is halved and ``congestion_window`` resets
+		  to 1 (slow start restart).
 		"""
 		# Guard against stale timers: only act if seq_num is still the earliest
 		if self.data_index >= len(self.data) and len(self.window) == 0:
 			# All data sent and acked: no need to keep timers running
-			print(f"[TCPServer] All data sent and acked; stopping retransmit timers time={self._network_time()}")
 			return
 
 		earliest = (self.last_ack_received + 1) % self.seq_space
@@ -335,15 +387,19 @@ class TCPServer(Node):
 		self.congestion_window = max(1, self.congestion_window // 2)
 
 	def _clamp_rto(self, value: int) -> int:
-		return max(self.min_rto, min(self.max_rto, int(value)))
+		"""Clamp *value* to ``[min_rto, max_rto]``."""
+		return max(self.min_rto, min(self.max_rto, value))
 
 	def _network_time(self) -> int:
-		return int(self.network.sim.time)
+		"""Return the current simulator time in milliseconds."""
+		return self.network.sim.time
 
 	def is_complete(self) -> bool:
+		"""Return ``True`` once all data has been sent and all frames acknowledged."""
 		return self.data_index >= len(self.data) and len(self.window) == 0
 
 	def snapshot(self) -> List:
+		"""Return ``[cwnd, threshold, rto, srtt, svar]`` for analytics plotting."""
 		return [
 			self.congestion_window,
 			self.congestion_threshold,

@@ -1,3 +1,9 @@
+"""Adaptive-timeout SACK receiver (client) for NetSim.
+
+The :class:`ATClient` is the receiver counterpart to :class:`~protocol.adaptive_timeout.at_server.ATServer`.
+Its implementation is nearly identical to
+:class:`~protocol.sliding_window_sack.swsack_client.SWSACKClient`;
+"""
 from __future__ import annotations
 
 from typing import List
@@ -9,6 +15,12 @@ from .common import SackBlock, decode_sw_payload, encode_sack_payload
 
 
 class ATClient(Node):
+    """Sliding-window receiver with SACK feedback for the adaptive-timeout protocol.
+
+    See :class:`~protocol.sliding_window_sack.swsack_client.SWSACKClient` for
+    full attribute and method documentation.  This class is kept separate to
+    avoid cross-package imports and to allow independent evolution.
+    """
     def __init__(
         self,
         name: int,
