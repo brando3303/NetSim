@@ -104,6 +104,9 @@ Attributes:
 			self.send_frame(next_seq, next_chunk)
 			self.last_frame_sent = next_seq
 
+		first_seq = (self.last_ack_received + 1) % self.seq_space
+		self.set_timer(self.retransmit_timeout, self.retransmit_timer, first_seq)
+
 	def receive(self, packet: Packet):
 		"""Handle an incoming packet (expected to be an ACK from the receiver)."""
 		if packet.src != self.receiver:
@@ -118,6 +121,7 @@ Attributes:
 
 	def handle_ack_packet(self, ack_seq: int, sack_blocks: list[SackBlock]):
 		"""Process a decoded ACK: mark frames acked, slide window, refill, retransmit."""
+		print("recieved ack", ack_seq, sack_blocks, " LAR=", self.last_ack_received)
 		if not self.is_in_window(ack_seq):
 			return
 
@@ -137,6 +141,7 @@ Attributes:
 		entry = self.window.get(ack_seq)
 		if entry is None:
 			return
+		print(f"ACKed seq_num={ack_seq}")
 		entry.acked = True
 
 	def process_sack_block(self, sack_block: SackBlock):
@@ -159,6 +164,8 @@ Attributes:
 				continue
 
 			send_seq = (self.last_frame_sent + 1) % self.seq_space
+			print(f"slid window to {self.last_ack_received}, delivered seq_num={next_seq}")
+
 			self.send_frame(send_seq, next_chunk)
 			self.last_frame_sent = send_seq
 
@@ -180,22 +187,30 @@ Attributes:
 			dst=self.receiver,
 		)
 		self.channels[0].send(packet)
-		self.set_timer(self.retransmit_timeout, self.retransmit_timer, seq_num)
 
 		if seq_num not in self.window:
 			self.window[seq_num] = _WindowEntry(acked=False, packet=packet)
 
 	def retransmit_timer(self, seq_num: int):
 		"""Retransmit callback: resend frame *seq_num* if still unacked and in window."""
-		if not self.is_in_window(seq_num):
+		print(f"retransmit timer fired for seq_num={seq_num}")
+		# Guard against stale timers: only act if seq_num is still the earliest
+		if self.data_index >= len(self.data) and len(self.window) == 0:
+			# All data sent and acked: no need to keep timers running
 			return
 
+		earliest = (self.last_ack_received + 1) % self.seq_space
 		entry = self.window.get(seq_num)
-		if entry is None or entry.acked:
+
+		if seq_num != earliest or entry is None or entry.acked or not self.is_in_window(seq_num):
+			self.network.schedule_after(self.retransmit_timeout, self.retransmit_timer, earliest)
 			return
 
+		# Retransmit the earliest unacked packet
 		self.channels[0].send(entry.packet)
+
 		self.set_timer(self.retransmit_timeout, self.retransmit_timer, seq_num)
+
 
 	def is_in_window(self, seq_num: int) -> bool:
 		return 0 < self.seq_dist(self.last_ack_received, seq_num) <= self.window_size

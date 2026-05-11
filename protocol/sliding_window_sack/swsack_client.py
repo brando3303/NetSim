@@ -75,6 +75,7 @@ class SWSACKClient(Node):
 		sender).  Buffers in-window frames, advances the cumulative ACK, then
 		replies with the new cumulative ACK + current SACK blocks.
 		"""
+		print(f"Received packet with seq_num={seq_num}, payload={payload}")
 		if not self.is_in_window(seq_num):
 			self.send_sack(self.last_ack_sent, [])
 			return

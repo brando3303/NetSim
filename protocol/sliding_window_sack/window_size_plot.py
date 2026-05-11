@@ -50,16 +50,17 @@ PAYLOAD = _HEADER + _CHUNK * 4
 
 SEQ_SPACE = 1001
 FRAME_SIZE = 2
-RETRANSMIT_TIMEOUT = 100
-BIT_RATE = 1000 * 8 * 10
-PROPAGATION_DELAY = 6
+RETRANSMIT_TIMEOUT = 200
+BIT_RATE = 1000 * 8 * 80
+PROPAGATION_DELAY = 3
 DELAY_VARIANCE = 0
 ERROR_RATE = 0
-WINDOW_SIZES = list(range(1, 60, 1))
+WINDOW_SIZES = list(range(1, 50, 1))
+QUEUE_SIZE = 10
 PLOT_OUTPUT = Path(__file__).with_name("window_size_completion_time.png")
 
 
-def run_trial(window_size: int, seed: int = 8) -> tuple[int, bool]:
+def run_trial(window_size: int, seed: int = 9) -> tuple[int, bool]:
     sim = NetworkSim(seed=seed, logging=False)
     network = Network(sim)
 
@@ -88,7 +89,7 @@ def run_trial(window_size: int, seed: int = 8) -> tuple[int, bool]:
         propagation_delay=PROPAGATION_DELAY,
         delay_variance=DELAY_VARIANCE,
         error_rate=ERROR_RATE,
-        max_queue_length=100
+        max_queue_length=QUEUE_SIZE
     )
     network.add_channel(channel)
     channel.add_node(server)
@@ -123,10 +124,12 @@ def calculate_optimal_window_size() -> float:
     frame_size = 31
     ack_size = 24
     bytes_per_seq = frame_size + ack_size
-
-    bandwidth_delay_product_bytes = PROPAGATION_DELAY * (BIT_RATE / 1000)
+    
+    # pd ms / 1000 ms/s  bit_rate bits/s / 8 bits/byte = bytes on the wire during one RTT
+    bandwidth_delay_product_bytes = (PROPAGATION_DELAY / 1000) * (BIT_RATE / 8)
     optimal_window_size = bandwidth_delay_product_bytes / bytes_per_seq
-    return optimal_window_size/2
+    print(f"Bandwidth-delay product (bytes) : {bandwidth_delay_product_bytes:.2f}")
+    return optimal_window_size*(frame_size/ack_size)
 
 def plot_completion_times(window_sizes: list[int], completion_times: list[int]) -> None:
     optimal_window_size = calculate_optimal_window_size()
@@ -137,7 +140,7 @@ def plot_completion_times(window_sizes: list[int], completion_times: list[int]) 
     plt.title(f"SWSACK Completion Time vs Window Size ({BIT_RATE // 8000} kbps, {PROPAGATION_DELAY} ms delay)")
     plt.xlabel("Window size (packets)")
     plt.ylabel("Completion time (ms)")
-    plt.axvline(optimal_window_size, color="red", linestyle="--", label=f"Optimal window size ≈ {optimal_window_size:.2f}")
+    plt.axvline(optimal_window_size, color="red", linestyle="--", label=f"Optimal window size ≈ {(optimal_window_size):.2f}")
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
